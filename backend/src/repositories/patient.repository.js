@@ -32,6 +32,16 @@ class PatientRepository {
     );
   }
 
+  async updateLocation(id, { roomNumber, bedNumber, wardId }) {
+    const update = {
+      roomNumber,
+      bedNumber: bedNumber || '',
+      lastLocationUpdate: new Date(),
+    };
+    if (wardId) update.wardId = wardId;
+    return await Patient.findByIdAndUpdate(id, update, { new: true, runValidators: true });
+  }
+
   async assignDevice(patientId, deviceId) {
     return await Patient.findByIdAndUpdate(
       patientId,
@@ -45,6 +55,13 @@ class PatientRepository {
       patientId,
       { assignedDeviceId: null },
       { new: true }
+    );
+  }
+
+  async unassignByDeviceCode(deviceCode) {
+    return await Patient.updateMany(
+      { assignedDeviceId: deviceCode },
+      { assignedDeviceId: null }
     );
   }
 

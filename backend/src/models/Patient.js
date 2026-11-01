@@ -17,6 +17,11 @@ const PatientSchema = new mongoose.Schema(
       required: [true, 'Bed number is required'],
       trim: true,
     },
+    wardId: {
+      type: String,
+      default: 'WARD-3B',
+      trim: true,
+    },
     status: {
       type: String,
       enum: ['ADMITTED', 'DISCHARGED'],
@@ -35,6 +40,10 @@ const PatientSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    lastLocationUpdate: {
+      type: Date,
+      default: Date.now,
+    },
     synthetic: {
       type: Boolean,
       default: true,
@@ -49,9 +58,9 @@ const PatientSchema = new mongoose.Schema(
   }
 );
 
-// Indexes for fast lookup by device and room/bed sorting
+// Indexes for fast lookup by device, room/bed sorting, and ward queries
 PatientSchema.index({ assignedDeviceId: 1 }, { sparse: true });
 PatientSchema.index({ roomNumber: 1, bedNumber: 1 });
+PatientSchema.index({ wardId: 1 });
 
 module.exports = mongoose.model('Patient', PatientSchema);
-

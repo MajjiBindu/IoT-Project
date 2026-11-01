@@ -36,16 +36,26 @@ class AlertRepository {
   }
 
   async resolve(id, staffId, notes = '') {
-    return await Alert.findByIdAndUpdate(
-      id,
-      {
-        status: 'RESOLVED',
-        resolvedAt: new Date(),
-        ...(staffId && !this.acknowledgedBy ? { acknowledgedBy: staffId } : {}),
-        ...(notes ? { notes } : {}),
-      },
-      { new: true }
-    ).populate('patientId');
+    const existing = await Alert.findById(id);
+    if (!existing) {
+      return null;
+    }
+
+    const updateData = {
+      status: 'RESOLVED',
+      resolvedAt: new Date(),
+      ...(notes ? { notes } : {}),
+    };
+
+    // Preserve existing acknowledgment; if alert was not previously acknowledged, record resolving staff
+    if (!existing.acknowledgedBy && staffId) {
+      updateData.acknowledgedBy = staffId;
+      if (!existing.acknowledgedAt) {
+        updateData.acknowledgedAt = new Date();
+      }
+    }
+
+    return await Alert.findByIdAndUpdate(id, updateData, { new: true }).populate('patientId');
   }
 
   async count(query = {}) {
