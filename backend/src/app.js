@@ -1,10 +1,15 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const { connectDB, getDBStatus } = require('./config/db');
 const { seedSyntheticData } = require('./services/seed.service');
 
+const authRoutes = require('./routes/auth.routes');
+const staffRoutes = require('./routes/staff.routes');
 const patientRoutes = require('./routes/patient.routes');
+const deviceRoutes = require('./routes/device.routes');
+const locationRoutes = require('./routes/location.routes');
 const alertRoutes = require('./routes/alert.routes');
 const simulatorRoutes = require('./routes/simulator.routes');
 const eventRoutes = require('./routes/event.routes');
@@ -13,10 +18,13 @@ const errorHandler = require('./middleware/errorHandler');
 const app = express();
 
 // Middleware
-app.use(cors({
-  origin: '*', // Allow frontend client connections
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: (origin, callback) => callback(null, true), // Reflect request origin to support credentials with cookies
+    credentials: true,
+  })
+);
+app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -43,7 +51,11 @@ app.get('/api/health', (req, res) => {
 });
 
 // Mount domain routes
+app.use('/api/auth', authRoutes);
+app.use('/api/staff', staffRoutes);
 app.use('/api/patients', patientRoutes);
+app.use('/api/devices', deviceRoutes);
+app.use('/api/locations', locationRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/simulator', simulatorRoutes);
 app.use('/api/events', eventRoutes);

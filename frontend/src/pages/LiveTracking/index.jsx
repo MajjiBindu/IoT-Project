@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Radio, Activity, Zap, Pause, Play, Trash2 } from 'lucide-react';
+import { Radio, Activity, Zap, Pause, Play, Trash2, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { sseClient } from '../../services/sseClient';
 import { StatusBadge } from '../../components/StatusBadge';
 
@@ -32,7 +32,7 @@ export const LiveTracking = () => {
             Real-Time Telemetry Stream (SSE)
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Live server-to-browser telemetry stream showing raw inertial measurements, sequence ordering, and fall detection triggers.
+            Live server-to-browser telemetry stream showing raw inertial measurements, sequence ordering, and multi-stage fall detection pipeline states.
           </p>
         </div>
 
@@ -56,7 +56,7 @@ export const LiveTracking = () => {
             <Activity size={32} style={{ margin: '0 auto 12px auto', opacity: 0.5 }} />
             <p>Awaiting incoming telemetry packets...</p>
             <p style={{ fontSize: '0.8rem', marginTop: '4px' }}>
-              Tip: Go to Simulation Controls to trigger walking, stationary, or fall telemetry.
+              Tip: Go to Simulation Controls to trigger walking, stationary, or multi-stage fall telemetry.
             </p>
           </div>
         ) : (
@@ -64,12 +64,12 @@ export const LiveTracking = () => {
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-muted)' }}>
                 <th style={{ padding: '10px' }}>Time</th>
-                <th style={{ padding: '10px' }}>SSE ID</th>
                 <th style={{ padding: '10px' }}>Device ID</th>
                 <th style={{ padding: '10px' }}>Sequence</th>
                 <th style={{ padding: '10px' }}>Movement State</th>
                 <th style={{ padding: '10px' }}>Accel Magnitude</th>
                 <th style={{ padding: '10px' }}>Orientation (Pitch/Roll)</th>
+                <th style={{ padding: '10px' }}>Multi-Stage Heuristic</th>
                 <th style={{ padding: '10px' }}>Alert Triggered</th>
               </tr>
             </thead>
@@ -85,9 +85,6 @@ export const LiveTracking = () => {
                   <td style={{ padding: '10px', fontFamily: 'var(--font-mono)' }}>
                     {evt.receivedAt ? evt.receivedAt.toLocaleTimeString() : '--'}
                   </td>
-                  <td style={{ padding: '10px', fontFamily: 'var(--font-mono)', color: 'var(--color-brand)' }}>
-                    {evt.sseEventId ? `#${evt.sseEventId}` : '--'}
-                  </td>
                   <td style={{ padding: '10px', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
                     {evt.deviceId}
                   </td>
@@ -98,12 +95,18 @@ export const LiveTracking = () => {
                     <StatusBadge status={evt.movementState} type="movement" />
                   </td>
                   <td style={{ padding: '10px', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                    <span style={{ color: evt.metrics?.accelMagnitude >= 2.8 ? '#ef4444' : 'inherit' }}>
+                    <span style={{ color: evt.metrics?.accelMagnitude >= 2.8 ? '#ef4444' : evt.metrics?.accelMagnitude <= 0.5 ? '#facc15' : 'inherit' }}>
                       {evt.metrics?.accelMagnitude?.toFixed(2)} G
                     </span>
                   </td>
                   <td style={{ padding: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
                     {evt.metrics?.pitch?.toFixed(1)}° / {evt.metrics?.roll?.toFixed(1)}°
+                  </td>
+                  <td style={{ padding: '10px' }}>
+                    <StatusBadge
+                      status={evt.detection?.stageName || (evt.alertGenerated ? 'FALL_CONFIRMED' : 'IDLE')}
+                      type="fallStage"
+                    />
                   </td>
                   <td style={{ padding: '10px' }}>
                     {evt.alertGenerated ? (
@@ -121,3 +124,6 @@ export const LiveTracking = () => {
     </div>
   );
 };
+
+export const LiveTrackingView = LiveTracking;
+export default LiveTracking;

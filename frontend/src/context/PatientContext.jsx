@@ -39,13 +39,35 @@ export const PatientProvider = ({ children }) => {
     // Listen for real-time movement status badge updates
     const unsubStatus = sseClient.on('patient_status_updated', (update) => {
       console.log('[PatientContext] SSE patient_status_updated received:', update);
+      const movementTimestamp = update.lastMovementUpdate || update.timestamp || new Date();
       setPatients((prev) =>
         prev.map((p) =>
           p._id === update.patientId
             ? {
                 ...p,
-                movementStatus: update.movementStatus,
-                lastMovementUpdate: update.lastMovementUpdate || new Date(),
+                ...(update.movementStatus && { movementStatus: update.movementStatus }),
+                ...(update.roomNumber && { roomNumber: update.roomNumber }),
+                ...(update.bedNumber !== undefined && { bedNumber: update.bedNumber }),
+                ...(update.assignedDeviceId !== undefined && { assignedDeviceId: update.assignedDeviceId }),
+                lastMovementUpdate: movementTimestamp,
+              }
+            : p
+        )
+      );
+    });
+
+    // Listen for real-time room/bed location updates
+    const unsubLocation = sseClient.on('location_updated', (loc) => {
+      console.log('[PatientContext] SSE location_updated received:', loc);
+      setPatients((prev) =>
+        prev.map((p) =>
+          p._id === loc.patientId
+            ? {
+                ...p,
+                roomNumber: loc.roomNumber,
+                bedNumber: loc.bedNumber,
+                wardId: loc.wardId || p.wardId,
+                lastLocationUpdate: loc.timestamp || new Date(),
               }
             : p
         )
@@ -55,6 +77,7 @@ export const PatientProvider = ({ children }) => {
     return () => {
       unsubReconnect();
       unsubStatus();
+      unsubLocation();
     };
   }, [fetchPatients]);
 

@@ -1,7 +1,9 @@
+import { getAuthToken } from './apiClient';
+
 /**
  * Server-Sent Events (SSE) Client
- * Handles connection lifecycle, event dispatching, deduplication,
- * and reconnection reconciliation.
+ * Handles authenticated connection lifecycle, event dispatching,
+ * deduplication, and reconnection reconciliation.
  */
 class SSEClient {
   constructor() {
@@ -47,15 +49,24 @@ class SSEClient {
     };
   }
 
-  connect() {
+  connect(explicitToken = null) {
     if (this.eventSource) {
       this.eventSource.close();
+      this.eventSource = null;
+    }
+
+    const token = explicitToken || getAuthToken();
+    if (!token) {
+      console.log('[SSE-Client] No auth token available. Deferring SSE connection until login.');
+      this.setStatus('DISCONNECTED');
+      return;
     }
 
     this.setStatus('CONNECTING');
-    console.log('[SSE-Client] Connecting to /api/events/stream...');
+    const streamUrl = `/api/events/stream?token=${encodeURIComponent(token)}`;
+    console.log('[SSE-Client] Connecting to authenticated stream...');
 
-    this.eventSource = new EventSource('/api/events/stream');
+    this.eventSource = new EventSource(streamUrl, { withCredentials: true });
 
     this.eventSource.onopen = () => {
       console.log('[SSE-Client] SSE stream open and connected.');
@@ -76,8 +87,8 @@ class SSEClient {
     };
 
     this.eventSource.onerror = (err) => {
-      console.warn('[SSE-Client] Connection error or interruption:', err);
-      // Browser EventSource automatically attempts to reconnect
+      console.warn('[SSE-Client] Connection error or unauthorized interruption:', err);
+      // Browser EventSource automatically attempts to reconnect if not closed
       if (this.eventSource && this.eventSource.readyState === EventSource.CONNECTING) {
         this.setStatus('CONNECTING');
       } else {
@@ -93,6 +104,8 @@ class SSEClient {
       'patient_status_updated',
       'sensor_event',
       'simulator_status',
+      'device_updated',
+      'location_updated',
     ];
 
     registeredEvents.forEach((eventType) => {

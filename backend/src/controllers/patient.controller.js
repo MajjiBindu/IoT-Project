@@ -1,5 +1,5 @@
 const patientRepository = require('../repositories/patient.repository');
-const deviceRepository = require('../repositories/device.repository');
+const deviceService = require('../services/device.service');
 
 class PatientController {
   async getPatients(req, res, next) {
@@ -33,14 +33,17 @@ class PatientController {
         roomNumber,
         bedNumber,
         notes,
-        assignedDeviceId: assignedDeviceId || null,
+        assignedDeviceId: null,
         synthetic: true,
       });
 
       if (assignedDeviceId) {
-        const device = await deviceRepository.findByCode(assignedDeviceId);
-        if (device) {
-          await deviceRepository.assignToPatient(device._id, patient._id);
+        try {
+          await deviceService.assignDevice(assignedDeviceId, patient._id);
+          const reloaded = await patientRepository.findById(patient._id);
+          return res.status(201).json({ success: true, data: reloaded });
+        } catch (assignErr) {
+          console.warn(`[PatientController] Could not auto-assign device ${assignedDeviceId}: ${assignErr.message}`);
         }
       }
 
@@ -65,16 +68,15 @@ class PatientController {
   async assignDevice(req, res, next) {
     try {
       const { deviceId } = req.body;
-      const patient = await patientRepository.assignDevice(req.params.id, deviceId);
-      if (!patient) {
-        return res.status(404).json({ success: false, message: 'Patient not found' });
+      if (!deviceId) {
+        return res.status(400).json({ success: false, message: 'deviceId is required in body' });
       }
-      const device = await deviceRepository.findByCode(deviceId);
-      if (device) {
-        await deviceRepository.assignToPatient(device._id, patient._id);
-      }
-      res.json({ success: true, data: patient });
+      const result = await deviceService.assignDevice(deviceId, req.params.id);
+      res.json({ success: true, data: result.patient, device: result.device });
     } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, message: err.message });
+      }
       next(err);
     }
   }
@@ -86,14 +88,14 @@ class PatientController {
         return res.status(404).json({ success: false, message: 'Patient not found' });
       }
       if (patient.assignedDeviceId) {
-        const device = await deviceRepository.findByCode(patient.assignedDeviceId);
-        if (device) {
-          await deviceRepository.unassign(device._id);
-        }
+        await deviceService.unassignDevice(patient.assignedDeviceId);
       }
-      const updated = await patientRepository.unassignDevice(req.params.id);
+      const updated = await patientRepository.findById(req.params.id);
       res.json({ success: true, data: updated });
     } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, message: err.message });
+      }
       next(err);
     }
   }

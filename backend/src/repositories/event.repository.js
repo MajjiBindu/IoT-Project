@@ -9,6 +9,13 @@ class EventRepository {
     return await SensorEvent.findOne({ deviceId, sequenceNumber });
   }
 
+  async getLatestSequenceForDevice(deviceId) {
+    const latest = await SensorEvent.findOne({ deviceId })
+      .sort({ sequenceNumber: -1 })
+      .select('sequenceNumber');
+    return latest && typeof latest.sequenceNumber === 'number' ? latest.sequenceNumber : 0;
+  }
+
   async findRecentByPatient(patientId, limit = 50) {
     return await SensorEvent.find({ patientId })
       .sort({ timestamp: -1 })

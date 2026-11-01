@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient } from '../services/apiClient';
 import { sseClient } from '../services/sseClient';
 import { useAudioAlert } from './AudioContext';
@@ -12,6 +12,11 @@ export const AlertProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { playEmergencyChime } = useAudioAlert();
+
+  const chimeRef = useRef(playEmergencyChime);
+  useEffect(() => {
+    chimeRef.current = playEmergencyChime;
+  }, [playEmergencyChime]);
 
   // Reconcile active alerts from REST API
   const refreshAlerts = useCallback(async () => {
@@ -48,7 +53,9 @@ export const AlertProvider = ({ children }) => {
 
       if (alert.severity === 'CRITICAL') {
         setCurrentCriticalAlert(alert);
-        playEmergencyChime();
+        if (chimeRef.current) {
+          chimeRef.current();
+        }
       }
     });
 
@@ -71,10 +78,11 @@ export const AlertProvider = ({ children }) => {
     });
 
     return () => {
+      unsubReconnect();
       unsubCreated();
       unsubUpdated();
     };
-  }, [refreshAlerts, playEmergencyChime]);
+  }, [refreshAlerts]);
 
   const acknowledgeAlert = async (id, staffId, notes) => {
     try {

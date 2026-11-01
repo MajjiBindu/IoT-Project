@@ -25,7 +25,7 @@ const SensorEventSchema = new mongoose.Schema(
     },
     movementState: {
       type: String,
-      enum: ['WALKING', 'STATIONARY', 'RESTING', 'FALL_IMPACT'],
+      enum: ['WALKING', 'STATIONARY', 'RESTING', 'FALL_IMPACT', 'FREE_FALL', 'ORIENTATION_CHANGE'],
       required: true,
     },
     metrics: {
@@ -57,4 +57,3 @@ SensorEventSchema.index({ deviceId: 1, sequenceNumber: 1 }, { unique: true });
 SensorEventSchema.index({ patientId: 1, timestamp: -1 });
 
 module.exports = mongoose.model('SensorEvent', SensorEventSchema);
-
