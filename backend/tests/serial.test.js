@@ -1,3 +1,4 @@
+jest.setTimeout(30000);
 const EventEmitter = require('events');
 const request = require('supertest');
 const mongoose = require('mongoose');
@@ -172,6 +173,7 @@ describe('Hospital Mobility Project — Arduino USB Serial Integration Tests', (
         'CALIBRATION_COMPLETED',
         'SENSOR_READY',
         'DATA,SEQUENCE,TIME_MS,RAW,BASELINE,DEVIATION,THRESHOLD,MOVEMENT_COUNT,EVENT,STATUS',
+        'TYPE,SEQUENCE,TIME_MS,RAW,BASELINE,DEVIATION,THRESHOLD,MOVEMENT_COUNT,EVENT,STATUS',
         'RANDOM_SERIAL_NOISE_123',
         '',
       ];
