@@ -1,0 +1,360 @@
+
+/*
+  =========================================================
+  HOSPITAL MOBILITY MONITORING SYSTEM
+  Arduino Uno - Piezoelectric Sensor Prototype
+  =========================================================
+
+  Hardware:
+  - Arduino Uno
+  - Existing piezoelectric sensor assembly
+  - Analog sensor input: A0
+  - LED output: D12
+  - USB Serial communication
+
+  Features:
+  - Automatic startup calibration
+  - Vibration / movement event detection
+  - Movement event counting
+  - Inactivity monitoring
+  - LED movement indication
+  - Sequence-numbered telemetry
+  - Sensor saturation monitoring
+
+  IMPORTANT:
+  This firmware detects vibration events.
+  It does not independently identify walking steps,
+  patient location, or confirmed falls.
+*/
+
+// ---------------- PIN CONFIGURATION ----------------
+
+const int SENSOR_PIN = A0;
+const int LED_PIN = 12;
+
+// ---------------- CONFIGURATION ----------------
+
+const unsigned long SERIAL_BAUD = 9600;
+
+const unsigned long SAMPLE_INTERVAL = 50;
+const unsigned long CALIBRATION_DURATION = 3000;
+
+const unsigned long MOVEMENT_COOLDOWN = 300;
+const unsigned long INACTIVITY_TIMEOUT = 10000;
+const unsigned long LED_DURATION = 200;
+
+// Movement sensitivity
+const int MIN_MOVEMENT_THRESHOLD = 30;
+const int MAX_MOVEMENT_THRESHOLD = 150;
+
+// Baseline adaptation
+const float BASELINE_ALPHA = 0.02;
+
+// ---------------- SENSOR VARIABLES ----------------
+
+int rawValue = 0;
+
+float sensorBaseline = 0;
+float movementThreshold = MIN_MOVEMENT_THRESHOLD;
+
+int calibrationMin = 1023;
+int calibrationMax = 0;
+
+unsigned long calibrationSamples = 0;
+unsigned long calibrationTotal = 0;
+
+unsigned long calibrationRailSamples = 0;
+
+bool calibrated = false;
+bool sensorSaturated = false;
+
+// ---------------- MOVEMENT VARIABLES ----------------
+
+unsigned long movementCount = 0;
+unsigned long sequenceNumber = 0;
+
+unsigned long lastSampleTime = 0;
+unsigned long lastMovementTime = 0;
+unsigned long lastEventTime = 0;
+unsigned long ledStartTime = 0;
+
+bool movementActive = false;
+bool ledActive = false;
+bool inactivityReported = false;
+
+// ---------------- SERIAL FUNCTIONS ----------------
+
+void printHeader() {
+
+  Serial.println(
+    "TYPE,SEQUENCE,TIME_MS,RAW,BASELINE,DEVIATION,"
+    "THRESHOLD,MOVEMENT_COUNT,EVENT,STATUS"
+  );
+}
+
+void printTelemetry(const char* eventName,
+                    const char* status,
+                    int deviation) {
+
+  Serial.print("DATA,");
+
+  Serial.print(sequenceNumber++);
+  Serial.print(",");
+
+  Serial.print(millis());
+  Serial.print(",");
+
+  Serial.print(rawValue);
+  Serial.print(",");
+
+  Serial.print(sensorBaseline, 2);
+  Serial.print(",");
+
+  Serial.print(deviation);
+  Serial.print(",");
+
+  Serial.print(movementThreshold, 2);
+  Serial.print(",");
+
+  Serial.print(movementCount);
+  Serial.print(",");
+
+  Serial.print(eventName);
+  Serial.print(",");
+
+  Serial.println(status);
+}
+
+// ---------------- STARTUP CALIBRATION ----------------
+
+void calibrateSensor() {
+
+  Serial.println("CALIBRATION_STARTED");
+  Serial.println("Keep the sensor assembly stationary.");
+
+  unsigned long startTime = millis();
+
+  unsigned long total = 0;
+  unsigned long samples = 0;
+  unsigned long railSamples = 0;
+
+  int minValue = 1023;
+  int maxValue = 0;
+
+  while (millis() - startTime < CALIBRATION_DURATION) {
+
+    int value = analogRead(SENSOR_PIN);
+
+    total += value;
+    samples++;
+
+    if (value < minValue) {
+      minValue = value;
+    }
+
+    if (value > maxValue) {
+      maxValue = value;
+    }
+
+    if (value <= 2 || value >= 1021) {
+      railSamples++;
+    }
+
+    delay(10);
+  }
+
+  if (samples == 0) {
+    sensorSaturated = true;
+    return;
+  }
+
+  sensorBaseline = (float)total / samples;
+
+  calibrationMin = minValue;
+  calibrationMax = maxValue;
+
+  calibrationSamples = samples;
+  calibrationTotal = total;
+  calibrationRailSamples = railSamples;
+
+  int noiseRange = maxValue - minValue;
+
+  movementThreshold = noiseRange * 2.5;
+
+  if (movementThreshold < MIN_MOVEMENT_THRESHOLD) {
+    movementThreshold = MIN_MOVEMENT_THRESHOLD;
+  }
+
+  if (movementThreshold > MAX_MOVEMENT_THRESHOLD) {
+    movementThreshold = MAX_MOVEMENT_THRESHOLD;
+  }
+
+  // Check whether the analog signal is close to
+  // the electrical limits of the Arduino ADC.
+
+  float railPercentage =
+    (100.0 * railSamples) / samples;
+
+  sensorSaturated =
+    (railPercentage > 5.0) ||
+    (sensorBaseline > 990.0) ||
+    (sensorBaseline < 30.0);
+
+  calibrated = true;
+
+  Serial.println("CALIBRATION_COMPLETED");
+
+  Serial.print("BASELINE:");
+  Serial.println(sensorBaseline, 2);
+
+  Serial.print("NOISE_RANGE:");
+  Serial.println(noiseRange);
+
+  Serial.print("MOVEMENT_THRESHOLD:");
+  Serial.println(movementThreshold, 2);
+
+  Serial.print("RAIL_PERCENTAGE:");
+  Serial.println(railPercentage, 2);
+
+  if (sensorSaturated) {
+    Serial.println("STATUS:SENSOR_SIGNAL_CHECK_REQUIRED");
+  } else {
+    Serial.println("STATUS:SENSOR_READY");
+  }
+
+  printHeader();
+
+  lastMovementTime = millis();
+  lastSampleTime = millis();
+}
+
+// ---------------- MOVEMENT DETECTION ----------------
+
+void processMovement() {
+
+  int deviation =
+    abs(rawValue - (int)sensorBaseline);
+
+  // Do not classify movement if the sensor signal
+  // is electrically saturated.
+
+  if (sensorSaturated) {
+
+    printTelemetry(
+      "NONE",
+      "SENSOR_CHECK",
+      deviation
+    );
+
+    return;
+  }
+
+  unsigned long now = millis();
+
+  // Detect a new vibration event.
+
+  if (deviation >= movementThreshold &&
+      !movementActive &&
+      now - lastEventTime >= MOVEMENT_COOLDOWN) {
+
+    movementActive = true;
+
+    movementCount++;
+
+    lastMovementTime = now;
+    lastEventTime = now;
+
+    inactivityReported = false;
+
+    digitalWrite(LED_PIN, HIGH);
+
+    ledActive = true;
+    ledStartTime = now;
+
+    printTelemetry(
+      "MOVEMENT",
+      "ACTIVE",
+      deviation
+    );
+  }
+
+  // Rearm after vibration settles.
+
+  if (deviation < movementThreshold * 0.5) {
+    movementActive = false;
+  }
+
+  // Update baseline only when the signal is quiet.
+
+  if (deviation < movementThreshold * 0.5) {
+
+    sensorBaseline =
+      (1.0 - BASELINE_ALPHA) * sensorBaseline +
+      BASELINE_ALPHA * rawValue;
+  }
+
+  // Turn off the LED after its indication period.
+
+  if (ledActive &&
+      now - ledStartTime >= LED_DURATION) {
+
+    digitalWrite(LED_PIN, LOW);
+    ledActive = false;
+  }
+
+  // Detect inactivity.
+
+  if (now - lastMovementTime >= INACTIVITY_TIMEOUT &&
+      !inactivityReported) {
+
+    printTelemetry(
+      "INACTIVITY",
+      "INACTIVE",
+      deviation
+    );
+
+    inactivityReported = true;
+  }
+}
+
+// ---------------- SETUP ----------------
+
+void setup() {
+
+  pinMode(SENSOR_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  digitalWrite(LED_PIN, LOW);
+
+  Serial.begin(SERIAL_BAUD);
+
+  delay(1000);
+
+  Serial.println();
+  Serial.println("HOSPITAL_MOBILITY_SYSTEM");
+  Serial.println("DEVICE:ARDUINO_UNO");
+  Serial.println("SENSOR:PIEZOELECTRIC");
+  Serial.println("VERSION:1.0");
+
+  calibrateSensor();
+}
+
+// ---------------- MAIN LOOP ----------------
+
+void loop() {
+
+  if (!calibrated) {
+    return;
+  }
+
+  unsigned long now = millis();
+
+  if (now - lastSampleTime >= SAMPLE_INTERVAL) {
+
+    lastSampleTime = now;
+
+    rawValue = analogRead(SENSOR_PIN);
+
+    processMovement();
+  }
+}

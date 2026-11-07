@@ -297,7 +297,11 @@ class SerialBridgeService {
     }
 
     // Ignore CSV headers if any
-    if (line.startsWith('DATA,SEQUENCE')) {
+    if (
+      line.startsWith('DATA,SEQUENCE') ||
+      line.startsWith('TYPE,SEQUENCE') ||
+      line.startsWith('TYPE,')
+    ) {
       return null;
     }
 
