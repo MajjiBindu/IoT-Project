@@ -120,6 +120,10 @@ async function seedSyntheticData() {
     if (staffCount === 0) {
       console.log('[Seed] No staff accounts detected. Seeding initial environment-configured accounts...');
 
+      if (process.env.NODE_ENV === 'production' && (!process.env.ADMIN_DEFAULT_PASSWORD || !process.env.JWT_SECRET)) {
+        console.warn('[Security Warning] Running in production with default credentials. Explicitly set ADMIN_DEFAULT_PASSWORD and JWT_SECRET in environment.');
+      }
+
       const adminEmail = process.env.ADMIN_DEFAULT_EMAIL || 'admin@hospital.org';
       const adminPassword = process.env.ADMIN_DEFAULT_PASSWORD || 'AdminSecure2026!';
       const adminName = process.env.ADMIN_DEFAULT_NAME || 'Chief Clinical Administrator';

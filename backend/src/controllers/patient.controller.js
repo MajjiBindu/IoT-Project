@@ -10,17 +10,37 @@ class PatientController {
    */
   async getPatients(req, res, next) {
     try {
-      const { status, wardId, movementStatus, fallRiskLevel, assignedNurseId, myOnly, search } = req.query;
+      const {
+        status,
+        wardId,
+        ward,
+        movementStatus,
+        movement,
+        fallRiskLevel,
+        risk,
+        assignedNurseId,
+        nurseId,
+        nurse,
+        myOnly,
+        search,
+      } = req.query;
+
       const query = {};
 
-      if (status) query.status = status;
-      if (wardId && wardId !== 'ALL') query.wardId = wardId;
-      if (movementStatus && movementStatus !== 'ALL') query.movementStatus = movementStatus;
-      if (fallRiskLevel && fallRiskLevel !== 'ALL') query.fallRiskLevel = fallRiskLevel;
+      if (status && status !== 'ALL') query.status = status;
 
-      // Filter by nurse: either explicitly queried or if nurse requests myOnly
-      if (assignedNurseId) {
-        query.assignedNurseId = assignedNurseId;
+      const targetWard = wardId || ward;
+      if (targetWard && targetWard !== 'ALL') query.wardId = targetWard;
+
+      const targetMovement = movementStatus || movement;
+      if (targetMovement && targetMovement !== 'ALL') query.movementStatus = targetMovement;
+
+      const targetRisk = fallRiskLevel || risk;
+      if (targetRisk && targetRisk !== 'ALL') query.fallRiskLevel = targetRisk;
+
+      const targetNurse = assignedNurseId || nurseId || nurse;
+      if (targetNurse && targetNurse !== 'ALL') {
+        query.assignedNurseId = targetNurse;
       } else if (req.staff?.role === 'NURSE' && (myOnly === 'true' || myOnly === true)) {
         query.assignedNurseId = req.staff._id;
       }

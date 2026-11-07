@@ -3,6 +3,23 @@ import { Activity, Moon, AlertTriangle, CheckCircle, ArrowDown, Zap } from 'luci
 
 export const StatusBadge = ({ status, type = 'movement', className = '' }) => {
   if (type === 'movement') {
+    if (status === 'VIBRATION_DETECTED' || status === 'MOVEMENT_DETECTED') {
+      return (
+        <span className={`badge ${className}`} style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#10b981' }} className="animate-pulse-emerald" />
+          <Activity size={13} />
+          Vibration Active
+        </span>
+      );
+    }
+    if (status === 'QUIESCENT' || status === 'NO_RECENT_MOVEMENT') {
+      return (
+        <span className={`badge ${className}`} style={{ background: 'rgba(100, 116, 139, 0.15)', color: '#94a3b8', border: '1px solid rgba(100, 116, 139, 0.3)' }}>
+          <Moon size={13} />
+          Piezo Quiescent
+        </span>
+      );
+    }
     if (status === 'WALKING') {
       return (
         <span className={`badge badge-walking ${className}`}>

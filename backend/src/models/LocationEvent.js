@@ -29,12 +29,18 @@ const LocationEventSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['ASSIGNED', 'LOCATION_UPDATED', 'UNKNOWN', 'NOT_AVAILABLE'],
+      enum: [
+        'ASSIGNED', 'LOCATION_UPDATED', 'UNKNOWN', 'NOT_AVAILABLE',
+        'Assigned', 'Location updated', 'Unknown', 'Not available'
+      ],
       default: 'LOCATION_UPDATED',
     },
     source: {
       type: String,
-      enum: ['MANUAL', 'BLE_BEACON', 'WIFI_TRIANGULATION', 'GPS', 'UWB', 'SENSOR_DERIVED'],
+      enum: [
+        'MANUAL', 'BLE_BEACON', 'WIFI_TRIANGULATION', 'GPS', 'UWB', 'SENSOR_DERIVED',
+        'SENSOR', 'BLE', 'WIFI'
+      ],
       default: 'MANUAL',
     },
     updatedBy: {

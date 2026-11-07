@@ -505,16 +505,15 @@ class SerialBridgeService {
 
     // Patient Activity Semantics (Stage 5)
     // SENSOR_CHECK does NOT change patient activity!
+    // Note: Piezo vibration is kept strictly distinct from gait 'WALKING'
     if (status === 'ACTIVE') {
       if (event === 'MOVEMENT') {
         this.lastPiezoActivity = 'MOVEMENT_DETECTED';
         this.lastMovementDetectedAt = savedRecord.timestamp;
         if (patientId) {
-          await patientRepository.updateMovementStatus(patientId, 'WALKING');
           await patientRepository.updatePiezoActivityStatus(patientId, 'MOVEMENT_DETECTED');
           sseManager.broadcast('patient_status_updated', {
             patientId,
-            movementStatus: 'WALKING',
             piezoActivityStatus: 'MOVEMENT_DETECTED',
             lastMovementUpdate: new Date(),
             lastPiezoActivityUpdate: new Date(),
@@ -525,11 +524,9 @@ class SerialBridgeService {
       } else if (event === 'INACTIVITY') {
         this.lastPiezoActivity = 'NO_RECENT_MOVEMENT';
         if (patientId) {
-          await patientRepository.updateMovementStatus(patientId, 'STATIONARY');
           await patientRepository.updatePiezoActivityStatus(patientId, 'NO_RECENT_MOVEMENT');
           sseManager.broadcast('patient_status_updated', {
             patientId,
-            movementStatus: 'STATIONARY',
             piezoActivityStatus: 'NO_RECENT_MOVEMENT',
             lastMovementUpdate: new Date(),
             lastPiezoActivityUpdate: new Date(),

@@ -44,7 +44,7 @@ export const LiveTracking = () => {
           source: 'HARDWARE_PIEZO',
           deviceId: telemetry.deviceId || 'ARDUINO-PIEZO-01',
           sequenceNumber: telemetry.sequenceNumber,
-          movementState: isMovement ? 'WALKING' : 'STATIONARY',
+          movementState: isMovement ? 'VIBRATION_DETECTED' : 'QUIESCENT',
           metrics: {
             raw: telemetry.raw,
             baseline: telemetry.baseline,

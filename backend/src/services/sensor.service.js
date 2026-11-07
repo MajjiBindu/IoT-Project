@@ -290,8 +290,11 @@ class SensorService {
 
     const results = [];
 
+    const isHardwareOnly = source === 'REAL_HARDWARE' || source === 'HARDWARE_PIEZO';
+    const isSimOnly = source === 'SIMULATOR' || source === 'SIMULATED_KINEMATICS';
+
     // 1. Fetch from SensorEvent (Simulator / IMU tag)
-    if (source !== 'REAL_HARDWARE') {
+    if (!isHardwareOnly) {
       const sQuery = {};
       if (patientId) sQuery.patientId = patientId;
       if (deviceId) sQuery.deviceId = deviceId;
@@ -339,7 +342,7 @@ class SensorService {
     }
 
     // 2. Fetch from PiezoEvent (Real Hardware)
-    if (source !== 'SIMULATOR') {
+    if (!isSimOnly) {
       const pQuery = {};
       if (patientId) pQuery.patientId = patientId;
       if (deviceId) pQuery.deviceId = deviceId;

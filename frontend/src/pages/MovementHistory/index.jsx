@@ -111,7 +111,7 @@ export const MovementHistory = () => {
     ];
 
     const rows = filteredItems.map((item) => {
-      const isPiezo = item.source === 'HARDWARE_PIEZO';
+      const isPiezo = item.source === 'HARDWARE_PIEZO' || item.source === 'REAL_HARDWARE';
       return [
         new Date(item.timestamp).toISOString(),
         item.sourceLabel || (isPiezo ? 'Physical Arduino Piezo' : 'Simulated Kinematics'),
@@ -411,7 +411,7 @@ export const MovementHistory = () => {
               </thead>
               <tbody>
                 {filteredItems.map((item, idx) => {
-                  const isHardware = item.source === 'HARDWARE_PIEZO';
+                  const isHardware = item.source === 'HARDWARE_PIEZO' || item.source === 'REAL_HARDWARE';
                   const isCritical = item.severity === 'CRITICAL';
 
                   return (
@@ -493,7 +493,18 @@ export const MovementHistory = () => {
 
                       {/* Movement State */}
                       <td style={{ padding: '12px 14px' }}>
-                        <StatusBadge status={item.movementState || item.eventType} type="movement" />
+                        <StatusBadge
+                          status={
+                            isHardware
+                              ? item.eventType === 'VIBRATION'
+                                ? 'VIBRATION_DETECTED'
+                                : item.eventType === 'STATIONARY'
+                                ? 'QUIESCENT'
+                                : item.eventType
+                              : item.movementState || item.eventType
+                          }
+                          type="movement"
+                        />
                       </td>
 
                       {/* Metrics (Hardware vs Kinematics) */}

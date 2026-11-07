@@ -29,12 +29,18 @@ const PatientSchema = new mongoose.Schema(
     },
     locationStatus: {
       type: String,
-      enum: ['ASSIGNED', 'LOCATION_UPDATED', 'UNKNOWN', 'NOT_AVAILABLE'],
+      enum: [
+        'ASSIGNED', 'LOCATION_UPDATED', 'UNKNOWN', 'NOT_AVAILABLE',
+        'Assigned', 'Location updated', 'Unknown', 'Not available'
+      ],
       default: 'ASSIGNED',
     },
     locationSource: {
       type: String,
-      enum: ['MANUAL', 'BLE_BEACON', 'WIFI_TRIANGULATION', 'GPS', 'UWB', 'SENSOR_DERIVED'],
+      enum: [
+        'MANUAL', 'BLE_BEACON', 'WIFI_TRIANGULATION', 'GPS', 'UWB', 'SENSOR_DERIVED',
+        'SENSOR', 'BLE', 'WIFI'
+      ],
       default: 'MANUAL',
     },
     age: {

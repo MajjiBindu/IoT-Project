@@ -43,11 +43,16 @@ class LocationService {
     bedNumber = typeof bedNumber === 'string' ? bedNumber.trim() : '';
     wardId = typeof wardId === 'string' && wardId.trim() ? wardId.trim().toUpperCase() : patient.wardId || 'WARD-3B';
     floor = typeof floor === 'string' && floor.trim() ? floor.trim() : patient.floor || 'Floor 3';
-    status = typeof status === 'string' && ['ASSIGNED', 'LOCATION_UPDATED', 'UNKNOWN', 'NOT_AVAILABLE'].includes(status)
-      ? status
+    const normalizedStatus = (status || 'LOCATION_UPDATED').toUpperCase().replace(/\s+/g, '_');
+    status = ['ASSIGNED', 'LOCATION_UPDATED', 'UNKNOWN', 'NOT_AVAILABLE'].includes(normalizedStatus)
+      ? normalizedStatus
       : 'LOCATION_UPDATED';
-    source = typeof source === 'string' && ['MANUAL', 'BLE_BEACON', 'WIFI_TRIANGULATION', 'GPS', 'UWB', 'SENSOR_DERIVED'].includes(source)
-      ? source
+    const normalizedSource = (source || 'MANUAL').toUpperCase().replace(/\s+/g, '_');
+    source = ['MANUAL', 'BLE_BEACON', 'WIFI_TRIANGULATION', 'GPS', 'UWB', 'SENSOR_DERIVED'].includes(normalizedSource)
+      ? normalizedSource
+      : normalizedSource === 'SENSOR' ? 'SENSOR_DERIVED'
+      : normalizedSource === 'BLE' ? 'BLE_BEACON'
+      : normalizedSource === 'WIFI' ? 'WIFI_TRIANGULATION'
       : 'MANUAL';
 
     // 4. Validate timestamp
