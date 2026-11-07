@@ -13,6 +13,8 @@ const locationRoutes = require('./routes/location.routes');
 const alertRoutes = require('./routes/alert.routes');
 const simulatorRoutes = require('./routes/simulator.routes');
 const eventRoutes = require('./routes/event.routes');
+const serialRoutes = require('./routes/serial.routes');
+const serialBridgeService = require('./services/serialBridge.service');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -59,6 +61,7 @@ app.use('/api/locations', locationRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/simulator', simulatorRoutes);
 app.use('/api/events', eventRoutes);
+app.use('/api/serial', serialRoutes);
 
 // Error Handler
 app.use(errorHandler);
@@ -71,11 +74,31 @@ if (process.env.NODE_ENV !== 'test') {
     try {
       await connectDB();
       await seedSyntheticData();
-      app.listen(PORT, () => {
+      await serialBridgeService.start();
+
+      const server = app.listen(PORT, () => {
         console.log(`[Server] Hospital Mobility Backend running on port ${PORT}`);
         console.log(`[Server] REST API: http://localhost:${PORT}/api`);
         console.log(`[Server] SSE Stream: http://localhost:${PORT}/api/events/stream`);
       });
+
+      const gracefulShutdown = async (signal) => {
+        console.log(`[Server] Received ${signal}. Shutting down gracefully...`);
+        try {
+          await serialBridgeService.stop();
+          if (server) {
+            await new Promise((resolve) => server.close(resolve));
+          }
+          const { disconnectDB } = require('./config/db');
+          await disconnectDB();
+        } catch (err) {
+          console.error(`[Server] Error during graceful shutdown: ${err.message}`);
+        }
+        process.exit(0);
+      };
+
+      process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+      process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     } catch (err) {
       console.error(`[Server] Failed to initialize: ${err.message}`);
       process.exit(1);

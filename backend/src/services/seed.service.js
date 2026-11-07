@@ -74,6 +74,7 @@ const SYNTHETIC_DEVICES = [
   { deviceCode: 'SIM-TAG-05', batteryLevel: 84, status: 'ACTIVE' },
   { deviceCode: 'SIM-TAG-06', batteryLevel: 99, status: 'ACTIVE' },
   { deviceCode: 'SIM-TAG-SPARE', batteryLevel: 100, status: 'OFFLINE' },
+  { deviceCode: 'ARDUINO-PIEZO-01', batteryLevel: 100, status: 'ACTIVE' },
 ];
 
 async function seedSyntheticData() {
@@ -160,6 +161,18 @@ async function seedSyntheticData() {
           });
         }
         console.log(`[Seed] Backfilled ${existingPatients.length} baseline location events.`);
+      }
+
+      // Ensure ARDUINO-PIEZO-01 device exists
+      const arduinoDevice = await Device.findOne({ deviceCode: 'ARDUINO-PIEZO-01' });
+      if (!arduinoDevice) {
+        await Device.create({
+          deviceCode: 'ARDUINO-PIEZO-01',
+          batteryLevel: 100,
+          status: 'ACTIVE',
+          assignedPatientId: null,
+        });
+        console.log('[Seed] Registered default ARDUINO-PIEZO-01 device.');
       }
     }
   } catch (err) {

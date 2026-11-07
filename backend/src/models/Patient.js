@@ -40,6 +40,15 @@ const PatientSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    piezoActivityStatus: {
+      type: String,
+      enum: ['MOVEMENT_DETECTED', 'NO_RECENT_MOVEMENT', 'UNKNOWN'],
+      default: 'UNKNOWN',
+    },
+    lastPiezoActivityUpdate: {
+      type: Date,
+      default: null,
+    },
     lastLocationUpdate: {
       type: Date,
       default: Date.now,

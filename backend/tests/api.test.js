@@ -6,6 +6,8 @@ const Patient = require('../src/models/Patient');
 const Device = require('../src/models/Device');
 const Alert = require('../src/models/Alert');
 const SensorEvent = require('../src/models/SensorEvent');
+const Staff = require('../src/models/Staff');
+const jwt = require('jsonwebtoken');
 const simulatorService = require('../src/services/simulator.service');
 const sensorService = require('../src/services/sensor.service');
 const sseManager = require('../src/sockets/sse.manager');
@@ -35,6 +37,7 @@ afterAll(async () => {
 describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
   let testPatient;
   let testDevice;
+  let authToken;
 
   beforeAll(async () => {
     testPatient = await Patient.create({
@@ -53,6 +56,17 @@ describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
       batteryLevel: 98,
       assignedPatientId: testPatient._id,
     });
+
+    await Staff.deleteMany({ email: 'apitest@hospital.org' });
+    const testStaff = await Staff.create({
+      fullName: 'API Test Staff',
+      email: 'apitest@hospital.org',
+      password: 'Password123!',
+      role: 'ADMIN',
+      status: 'ACTIVE',
+    });
+    const secret = process.env.JWT_SECRET || 'hospital_mobility_jwt_secure_key_2026_dev_random_signature_string';
+    authToken = jwt.sign({ id: testStaff._id, role: 'ADMIN', email: testStaff.email }, secret);
   });
 
   // =========================================================================
@@ -152,7 +166,7 @@ describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
     });
 
     it('GET /api/patients returns persistent patient list from MongoDB', async () => {
-      const res = await request(app).get('/api/patients');
+      const res = await request(app).get('/api/patients').set('Authorization', `Bearer ${authToken}`);
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.data)).toBe(true);
@@ -160,7 +174,7 @@ describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
     });
 
     it('GET /api/patients/:id returns specific patient from MongoDB', async () => {
-      const res = await request(app).get(`/api/patients/${testPatient._id}`);
+      const res = await request(app).get(`/api/patients/${testPatient._id}`).set('Authorization', `Bearer ${authToken}`);
       expect(res.status).toBe(200);
       expect(res.body.data.name).toBe('Test Synthetic Patient');
     });
@@ -251,6 +265,7 @@ describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
     it('POST /api/simulator/fall creates a CRITICAL fall alert persisted in MongoDB', async () => {
       const res = await request(app)
         .post('/api/simulator/fall')
+        .set('Authorization', `Bearer ${authToken}`)
         .send({ patientId: testPatient._id });
 
       expect(res.status).toBe(201);
@@ -288,6 +303,7 @@ describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
     it('PATCH /api/alerts/:id/acknowledge updates and persists ACKNOWLEDGED status with staff ID', async () => {
       const res = await request(app)
         .patch(`/api/alerts/${activeAlertId}/acknowledge`)
+        .set('Authorization', `Bearer ${authToken}`)
         .send({
           staffId: 'STAFF-RN-SARAH',
           notes: 'Caregiver attending patient at bedside.',
@@ -308,6 +324,7 @@ describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
     it('PATCH /api/alerts/:id/resolve updates and persists RESOLVED status and timestamp', async () => {
       const res = await request(app)
         .patch(`/api/alerts/${activeAlertId}/resolve`)
+        .set('Authorization', `Bearer ${authToken}`)
         .send({
           staffId: 'STAFF-RN-SARAH',
           notes: 'Patient evaluated, no injury, assisted back into bed.',
@@ -337,6 +354,7 @@ describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
 
       const res = await request(app)
         .post('/api/simulator/inactivity')
+        .set('Authorization', `Bearer ${authToken}`)
         .send({ patientId: testPatient._id });
 
       expect(res.status).toBe(200);
@@ -355,6 +373,7 @@ describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
     it('POST /api/simulator/walk updates patient status to WALKING in MongoDB', async () => {
       const res = await request(app)
         .post('/api/simulator/walk')
+        .set('Authorization', `Bearer ${authToken}`)
         .send({ patientId: testPatient._id });
 
       expect(res.status).toBe(200);
@@ -373,7 +392,7 @@ describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
     it('GET /api/events/stream responds with text/event-stream and keep-alive headers', (done) => {
       const server = app.listen(0, () => {
         const port = server.address().port;
-        const req = http.get(`http://localhost:${port}/api/events/stream`, (res) => {
+        const req = http.get(`http://localhost:${port}/api/events/stream?token=${authToken}`, (res) => {
           expect(res.headers['content-type']).toContain('text/event-stream');
           expect(res.headers['connection']).toBe('keep-alive');
           expect(res.headers['cache-control']).toContain('no-cache');
@@ -399,7 +418,7 @@ describe('Hospital Mobility Project — MongoDB Integration Tests', () => {
         const options = {
           hostname: 'localhost',
           port,
-          path: '/api/events/stream',
+          path: `/api/events/stream?token=${authToken}`,
           headers: {
             'Last-Event-ID': String(eventId - 1),
           },
