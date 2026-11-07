@@ -11,12 +11,31 @@ export const AlertProvider = ({ children }) => {
   const [currentCriticalAlert, setCurrentCriticalAlert] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { playEmergencyChime } = useAudioAlert();
+  const {
+    playEmergencyAlarm,
+    playWarningChime,
+    playInfoPing,
+    startEmergencyLoop,
+    stopEmergencyLoop,
+  } = useAudioAlert();
 
-  const chimeRef = useRef(playEmergencyChime);
+  const audioFnsRef = useRef({
+    playEmergencyAlarm,
+    playWarningChime,
+    playInfoPing,
+    startEmergencyLoop,
+    stopEmergencyLoop,
+  });
+
   useEffect(() => {
-    chimeRef.current = playEmergencyChime;
-  }, [playEmergencyChime]);
+    audioFnsRef.current = {
+      playEmergencyAlarm,
+      playWarningChime,
+      playInfoPing,
+      startEmergencyLoop,
+      stopEmergencyLoop,
+    };
+  }, [playEmergencyAlarm, playWarningChime, playInfoPing, startEmergencyLoop, stopEmergencyLoop]);
 
   // Reconcile active alerts from REST API
   const refreshAlerts = useCallback(async () => {
@@ -53,8 +72,16 @@ export const AlertProvider = ({ children }) => {
 
       if (alert.severity === 'CRITICAL') {
         setCurrentCriticalAlert(alert);
-        if (chimeRef.current) {
-          chimeRef.current();
+        if (audioFnsRef.current.startEmergencyLoop) {
+          audioFnsRef.current.startEmergencyLoop(alert._id);
+        }
+      } else if (alert.severity === 'WARNING') {
+        if (audioFnsRef.current.playWarningChime) {
+          audioFnsRef.current.playWarningChime();
+        }
+      } else {
+        if (audioFnsRef.current.playInfoPing) {
+          audioFnsRef.current.playInfoPing();
         }
       }
     });
@@ -64,6 +91,12 @@ export const AlertProvider = ({ children }) => {
       console.log('[AlertContext] SSE alert_updated received:', updated);
       if (updated.status === 'RESOLVED') {
         setActiveAlerts((prev) => prev.filter((a) => a._id !== updated._id));
+        audioFnsRef.current.stopEmergencyLoop();
+      } else if (updated.status === 'ACKNOWLEDGED') {
+        audioFnsRef.current.stopEmergencyLoop();
+        setActiveAlerts((prev) =>
+          prev.map((a) => (a._id === updated._id ? updated : a))
+        );
       } else {
         setActiveAlerts((prev) =>
           prev.map((a) => (a._id === updated._id ? updated : a))
@@ -86,6 +119,7 @@ export const AlertProvider = ({ children }) => {
 
   const acknowledgeAlert = async (id, staffId, notes) => {
     try {
+      audioFnsRef.current.stopEmergencyLoop();
       const res = await apiClient.acknowledgeAlert(id, staffId, notes);
       if (res.success) {
         // SSE broadcast will also update state, but update optimistically
@@ -102,6 +136,7 @@ export const AlertProvider = ({ children }) => {
 
   const resolveAlert = async (id, staffId, notes) => {
     try {
+      audioFnsRef.current.stopEmergencyLoop();
       const res = await apiClient.resolveAlert(id, staffId, notes);
       if (res.success) {
         setActiveAlerts((prev) => prev.filter((a) => a._id !== id));
@@ -114,6 +149,7 @@ export const AlertProvider = ({ children }) => {
   };
 
   const dismissCriticalModal = () => {
+    audioFnsRef.current.stopEmergencyLoop();
     setCurrentCriticalAlert(null);
   };
 

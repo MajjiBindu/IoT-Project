@@ -28,6 +28,24 @@ const SensorEventSchema = new mongoose.Schema(
       enum: ['WALKING', 'STATIONARY', 'RESTING', 'FALL_IMPACT', 'FREE_FALL', 'ORIENTATION_CHANGE'],
       required: true,
     },
+    impactPeak: {
+      type: Number,
+      default: null,
+    },
+    freefallDurationMs: {
+      type: Number,
+      default: 0,
+    },
+    severity: {
+      type: String,
+      enum: ['NORMAL', 'WARNING', 'CRITICAL'],
+      default: 'NORMAL',
+    },
+    source: {
+      type: String,
+      enum: ['SIMULATOR', 'IMU_TAG', 'REAL_HARDWARE'],
+      default: 'SIMULATOR',
+    },
     metrics: {
       accelMagnitude: {
         type: Number,

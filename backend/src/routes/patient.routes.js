@@ -13,6 +13,8 @@ router.get('/:id', (req, res, next) => patientController.getPatientById(req, res
 // Write access: ADMIN only
 router.post('/', authorize('ADMIN'), (req, res, next) => patientController.createPatient(req, res, next));
 router.put('/:id', authorize('ADMIN'), (req, res, next) => patientController.updatePatient(req, res, next));
+router.patch('/:id/assign-nurse', authorize('ADMIN'), (req, res, next) => patientController.assignNurse(req, res, next));
+router.patch('/:id/discharge', authorize('ADMIN'), (req, res, next) => patientController.dischargePatient(req, res, next));
 router.patch('/:id/assign-device', authorize('ADMIN'), (req, res, next) => patientController.assignDevice(req, res, next));
 router.patch('/:id/unassign-device', authorize('ADMIN'), (req, res, next) => patientController.unassignDevice(req, res, next));
 

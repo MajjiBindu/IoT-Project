@@ -7,7 +7,10 @@ export const AudioProvider = ({ children }) => {
     return localStorage.getItem('hospital_mobility_muted') === 'true';
   });
   const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
+  const [activeEmergencyAlert, setActiveEmergencyAlert] = useState(null);
+
   const audioCtxRef = useRef(null);
+  const emergencyIntervalRef = useRef(null);
 
   // Initialize Web Audio Context lazily on user interaction
   const getAudioContext = () => {
@@ -41,20 +44,19 @@ export const AudioProvider = ({ children }) => {
       localStorage.setItem('hospital_mobility_muted', String(next));
       if (!next) {
         resumeAudioContext();
+      } else {
+        stopEmergencyLoop();
       }
       return next;
     });
   };
 
   /**
-   * Synthesize high-priority two-tone clinical alert chime
-   * Frequencies: 880Hz (A5) for 200ms -> 1174.66Hz (D6) for 350ms
+   * Emergency Alarm Pulse (Urgent dual-tone rapid siren)
+   * 880Hz (A5) -> 1200Hz high alert
    */
-  const playEmergencyChime = async () => {
-    if (isMuted) {
-      console.log('[Audio] Emergency chime silenced (User Muted).');
-      return;
-    }
+  const playEmergencyAlarm = async () => {
+    if (isMuted) return;
 
     try {
       const ctx = getAudioContext();
@@ -62,37 +64,130 @@ export const AudioProvider = ({ children }) => {
 
       if (ctx.state === 'suspended') {
         setIsAutoplayBlocked(true);
-        console.warn('[Audio] Browser blocked autoplay audio. Visual alerts active.');
         return;
       }
 
       const now = ctx.currentTime;
-
-      // Master gain node
       const masterGain = ctx.createGain();
-      masterGain.gain.setValueAtTime(0.4, now);
-      masterGain.gain.exponentialRampToValueAtTime(0.01, now + 0.65);
+      masterGain.gain.setValueAtTime(0.5, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
       masterGain.connect(ctx.destination);
 
-      // Tone 1 (880Hz)
-      const osc1 = ctx.createOscillator();
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(880, now);
-      osc1.connect(masterGain);
-      osc1.start(now);
-      osc1.stop(now + 0.22);
+      // Rapid alternating siren
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(880, now);
+      osc.frequency.linearRampToValueAtTime(1320, now + 0.2);
+      osc.frequency.linearRampToValueAtTime(880, now + 0.4);
+      osc.frequency.linearRampToValueAtTime(1320, now + 0.6);
+      osc.connect(masterGain);
 
-      // Tone 2 (1174.66Hz - urgency interval)
-      const osc2 = ctx.createOscillator();
-      osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(1174.66, now + 0.22);
-      osc2.connect(masterGain);
-      osc2.start(now + 0.22);
-      osc2.stop(now + 0.65);
+      osc.start(now);
+      osc.stop(now + 0.7);
     } catch (err) {
-      console.warn('[Audio] Non-fatal audio cue failure:', err);
+      console.warn('[Audio] Emergency alarm failed:', err);
     }
   };
+
+  /**
+   * Warning Alert Chime (Moderate chime: D5 587Hz -> E5 659Hz)
+   */
+  const playWarningChime = async () => {
+    if (isMuted) return;
+
+    try {
+      const ctx = getAudioContext();
+      if (!ctx || ctx.state === 'suspended') return;
+
+      const now = ctx.currentTime;
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.3, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+      masterGain.connect(ctx.destination);
+
+      const osc1 = ctx.createOscillator();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(587.33, now);
+      osc1.connect(masterGain);
+      osc1.start(now);
+      osc1.stop(now + 0.25);
+
+      const osc2 = ctx.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(659.25, now + 0.25);
+      osc2.connect(masterGain);
+      osc2.start(now + 0.25);
+      osc2.stop(now + 0.6);
+    } catch (err) {
+      console.warn('[Audio] Warning chime failed:', err);
+    }
+  };
+
+  /**
+   * Info / Recovery Beep (Soft crisp ping: C6 1046.5Hz)
+   */
+  const playInfoPing = async () => {
+    if (isMuted) return;
+
+    try {
+      const ctx = getAudioContext();
+      if (!ctx || ctx.state === 'suspended') return;
+
+      const now = ctx.currentTime;
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.2, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      masterGain.connect(ctx.destination);
+
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1046.5, now);
+      osc.connect(masterGain);
+      osc.start(now);
+      osc.stop(now + 0.35);
+    } catch (err) {
+      console.warn('[Audio] Info ping failed:', err);
+    }
+  };
+
+  /**
+   * Start looping emergency siren until acknowledged or silenced
+   */
+  const startEmergencyLoop = (alertId) => {
+    setActiveEmergencyAlert(alertId);
+    playEmergencyAlarm();
+
+    if (emergencyIntervalRef.current) {
+      clearInterval(emergencyIntervalRef.current);
+    }
+
+    emergencyIntervalRef.current = setInterval(() => {
+      playEmergencyAlarm();
+    }, 1800);
+  };
+
+  /**
+   * Stop and silence emergency loop
+   */
+  const stopEmergencyLoop = () => {
+    if (emergencyIntervalRef.current) {
+      clearInterval(emergencyIntervalRef.current);
+      emergencyIntervalRef.current = null;
+    }
+    setActiveEmergencyAlert(null);
+  };
+
+  // Backward compatibility alias
+  const playEmergencyChime = playEmergencyAlarm;
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (emergencyIntervalRef.current) {
+        clearInterval(emergencyIntervalRef.current);
+      }
+    };
+  }, []);
 
   return (
     <AudioContext.Provider
@@ -101,9 +196,41 @@ export const AudioProvider = ({ children }) => {
         toggleMute,
         isAutoplayBlocked,
         resumeAudioContext,
+        playEmergencyAlarm,
+        playWarningChime,
+        playInfoPing,
         playEmergencyChime,
+        startEmergencyLoop,
+        stopEmergencyLoop,
+        activeEmergencyAlert,
       }}
     >
+      {/* Visual notification when audio autoplay is blocked */}
+      {isAutoplayBlocked && (
+        <div
+          onClick={resumeAudioContext}
+          style={{
+            position: 'fixed',
+            bottom: '16px',
+            right: '16px',
+            zIndex: 9999,
+            backgroundColor: '#ea580c',
+            color: '#ffffff',
+            padding: '10px 18px',
+            borderRadius: '8px',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.4)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            fontSize: '13px',
+            fontWeight: 600,
+          }}
+        >
+          <span>🔇 Sound blocked by browser</span>
+          <span style={{ textDecoration: 'underline' }}>Click here to enable alert chimes</span>
+        </div>
+      )}
       {children}
     </AudioContext.Provider>
   );

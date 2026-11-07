@@ -2,11 +2,13 @@ const Patient = require('../models/Patient');
 
 class PatientRepository {
   async findAll(query = {}) {
-    return await Patient.find(query).sort({ roomNumber: 1, bedNumber: 1 });
+    return await Patient.find(query)
+      .populate('assignedNurseId', 'fullName email role status')
+      .sort({ roomNumber: 1, bedNumber: 1 });
   }
 
   async findById(id) {
-    return await Patient.findById(id);
+    return await Patient.findById(id).populate('assignedNurseId', 'fullName email role status');
   }
 
   async findByDeviceId(deviceId) {
@@ -43,14 +45,33 @@ class PatientRepository {
     );
   }
 
-  async updateLocation(id, { roomNumber, bedNumber, wardId }) {
+  async updateLocation(id, { roomNumber, bedNumber, wardId, floor, locationStatus, locationSource }) {
     const update = {
       roomNumber,
       bedNumber: bedNumber || '',
       lastLocationUpdate: new Date(),
     };
     if (wardId) update.wardId = wardId;
+    if (floor) update.floor = floor;
+    if (locationStatus) update.locationStatus = locationStatus;
+    if (locationSource) update.locationSource = locationSource;
     return await Patient.findByIdAndUpdate(id, update, { new: true, runValidators: true });
+  }
+
+  async assignNurse(patientId, nurseId) {
+    return await Patient.findByIdAndUpdate(
+      patientId,
+      { assignedNurseId: nurseId || null },
+      { new: true }
+    ).populate('assignedNurseId', 'fullName email role');
+  }
+
+  async discharge(patientId) {
+    return await Patient.findByIdAndUpdate(
+      patientId,
+      { status: 'DISCHARGED', assignedDeviceId: null },
+      { new: true }
+    );
   }
 
   async assignDevice(patientId, deviceId) {

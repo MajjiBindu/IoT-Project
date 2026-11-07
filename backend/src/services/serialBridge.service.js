@@ -5,6 +5,7 @@ const deviceRepository = require('../repositories/device.repository');
 const patientRepository = require('../repositories/patient.repository');
 const Device = require('../models/Device');
 const sseManager = require('../sockets/sse.manager');
+const hardwareFaultService = require('./hardwareFault.service');
 
 class SerialBridgeService {
   constructor(options = {}) {
@@ -29,6 +30,7 @@ class SerialBridgeService {
     this.lastSensorStatus = null; // 'ACTIVE' | 'INACTIVE' | 'SENSOR_CHECK'
     this.lastDiagnostic = null;
     this.reconnectTimer = null;
+    this.packetWatchdogTimer = null;
     this.isStopped = false;
 
     this.stats = {
@@ -146,6 +148,10 @@ class SerialBridgeService {
           this.lastError = null;
           console.log(`[SerialBridge] Successfully connected to Arduino on ${this.portName} @ ${this.baudRate} baud.`);
 
+          hardwareFaultService.recordRecovery(this.deviceCode, 'SERIAL_COMM_FAILURE', 'Serial port connected successfully');
+          hardwareFaultService.recordRecovery(this.deviceCode, 'SENSOR_DISCONNECTED', 'Serial port connected successfully');
+          this.resetPacketWatchdog();
+
           sseManager.broadcast('serial_status', this.getStatusPayload());
 
           this.parser = this.port.pipe(new this.ReadlineParserClass({ delimiter: '\r\n' }));
@@ -155,6 +161,12 @@ class SerialBridgeService {
             console.warn(`[SerialBridge] Serial port ${this.portName} closed: ${closeErr ? closeErr.message : 'Clean close'}`);
             this.cleanupPort();
             this.status = 'DISCONNECTED';
+            hardwareFaultService.recordFault({
+              deviceId: this.deviceCode,
+              faultType: 'SENSOR_DISCONNECTED',
+              severity: 'CRITICAL',
+              details: closeErr ? closeErr.message : 'Serial connection closed',
+            });
             sseManager.broadcast('serial_status', this.getStatusPayload());
             if (!this.isStopped) {
               this.scheduleReconnect();
@@ -174,11 +186,42 @@ class SerialBridgeService {
     });
   }
 
+  resetPacketWatchdog() {
+    this.cleanupWatchdog();
+    this.packetWatchdogTimer = setTimeout(() => {
+      if (this.status === 'CONNECTED' && !this.isStopped) {
+        hardwareFaultService.recordFault({
+          deviceId: this.deviceCode,
+          faultType: 'MISSING_PACKETS',
+          severity: 'WARNING',
+          details: 'Telemetry packets stopped arriving (heartbeat timeout > 3500ms)',
+        });
+      }
+    }, 3500);
+
+    if (this.packetWatchdogTimer.unref) {
+      this.packetWatchdogTimer.unref();
+    }
+  }
+
+  cleanupWatchdog() {
+    if (this.packetWatchdogTimer) {
+      clearTimeout(this.packetWatchdogTimer);
+      this.packetWatchdogTimer = null;
+    }
+  }
+
   handlePortError(err) {
     const errorMsg = err?.message || 'Unknown serial port error';
     console.error(`[SerialBridge] Port error on ${this.portName}: ${errorMsg}`);
     this.status = 'ERROR';
     this.lastError = errorMsg;
+    hardwareFaultService.recordFault({
+      deviceId: this.deviceCode,
+      faultType: 'SERIAL_COMM_FAILURE',
+      severity: 'CRITICAL',
+      details: errorMsg,
+    });
     this.cleanupPort();
     sseManager.broadcast('serial_status', this.getStatusPayload());
 
@@ -204,6 +247,7 @@ class SerialBridgeService {
   }
 
   cleanupPort() {
+    this.cleanupWatchdog();
     if (this.parser) {
       try {
         this.parser.removeAllListeners();
@@ -229,6 +273,10 @@ class SerialBridgeService {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
     }
 
     return new Promise((resolve) => {
@@ -287,11 +335,19 @@ class SerialBridgeService {
 
       if (line.includes('SENSOR_SIGNAL_CHECK_REQUIRED')) {
         this.lastSensorStatus = 'SENSOR_CHECK';
+        hardwareFaultService.recordFault({
+          deviceId: this.deviceCode,
+          faultType: 'SENSOR_SATURATED',
+          severity: 'WARNING',
+          details: 'Piezo sensor upper rail saturation detected by firmware diagnostic window',
+        });
         sseManager.broadcast('serial_diagnostic', {
           type: 'SENSOR_SIGNAL_CHECK_REQUIRED',
           message: 'Piezo sensor signal check required. Verify physical probe placement and wiring.',
           timestamp: new Date(),
         });
+      } else if (line.includes('SENSOR_READY')) {
+        hardwareFaultService.recordRecovery(this.deviceCode, 'SENSOR_SATURATED', 'Sensor returned to normal voltage');
       }
       return null;
     }
@@ -352,8 +408,28 @@ class SerialBridgeService {
     ) {
       console.warn(`[SerialBridge] Discarded packet with invalid numeric data: ${line}`);
       this.stats.droppedPackets += 1;
+      hardwareFaultService.recordFault({
+        deviceId: this.deviceCode,
+        faultType: 'INVALID_READINGS',
+        severity: 'WARNING',
+        details: 'Packet contained non-numeric or malformed telemetry: ' + line,
+      });
       return null;
     }
+
+    // Check for out-of-range ADC reading
+    if (raw < 0 || raw > 1023) {
+      hardwareFaultService.recordFault({
+        deviceId: this.deviceCode,
+        faultType: 'INVALID_READINGS',
+        severity: 'WARNING',
+        details: `ADC raw value out of 10-bit range: ${raw}`,
+      });
+    }
+
+    // Heartbeat packet received: recover missing packets fault and reset watchdog
+    this.resetPacketWatchdog();
+    hardwareFaultService.recordRecovery(this.deviceCode, 'MISSING_PACKETS', 'Heartbeat telemetry stream active');
 
     // Validate enums
     const event = rawEvent.trim().toUpperCase();
@@ -434,10 +510,13 @@ class SerialBridgeService {
         this.lastPiezoActivity = 'MOVEMENT_DETECTED';
         this.lastMovementDetectedAt = savedRecord.timestamp;
         if (patientId) {
+          await patientRepository.updateMovementStatus(patientId, 'WALKING');
           await patientRepository.updatePiezoActivityStatus(patientId, 'MOVEMENT_DETECTED');
           sseManager.broadcast('patient_status_updated', {
             patientId,
+            movementStatus: 'WALKING',
             piezoActivityStatus: 'MOVEMENT_DETECTED',
+            lastMovementUpdate: new Date(),
             lastPiezoActivityUpdate: new Date(),
             timestamp: new Date(),
             source: 'PIEZO_SENSOR',
@@ -446,10 +525,13 @@ class SerialBridgeService {
       } else if (event === 'INACTIVITY') {
         this.lastPiezoActivity = 'NO_RECENT_MOVEMENT';
         if (patientId) {
+          await patientRepository.updateMovementStatus(patientId, 'STATIONARY');
           await patientRepository.updatePiezoActivityStatus(patientId, 'NO_RECENT_MOVEMENT');
           sseManager.broadcast('patient_status_updated', {
             patientId,
+            movementStatus: 'STATIONARY',
             piezoActivityStatus: 'NO_RECENT_MOVEMENT',
+            lastMovementUpdate: new Date(),
             lastPiezoActivityUpdate: new Date(),
             timestamp: new Date(),
             source: 'PIEZO_SENSOR',
@@ -537,6 +619,10 @@ class SerialBridgeService {
       stats: { ...this.stats },
       lastError: this.lastError,
     };
+  }
+
+  async getHistory(limit = 100) {
+    return await piezoEventRepository.findRecent({}, limit);
   }
 }
 

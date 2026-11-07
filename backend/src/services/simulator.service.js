@@ -2,6 +2,7 @@ const sensorService = require('./sensor.service');
 const patientRepository = require('../repositories/patient.repository');
 const eventRepository = require('../repositories/event.repository');
 const sseManager = require('../sockets/sse.manager');
+const hardwareFaultService = require('./hardwareFault.service');
 
 class SimulatorService {
   constructor() {
@@ -68,7 +69,157 @@ class SimulatorService {
   }
 
   /**
-   * Scenario 2: Manual Inactivity Simulation (Deterministic)
+   * Scenario 2: Normal Standing (Deterministic)
+   * Upright motionless posture (accel magnitude ~ 1.00G, zero tilt)
+   */
+  async simulateStand(patientId) {
+    const { patient, deviceId } = await this.resolvePatientAndDevice(patientId);
+    const sequenceNumber = await this.getNextSequence(deviceId);
+
+    const payload = {
+      deviceId,
+      patientId: patient._id,
+      sequenceNumber,
+      timestamp: new Date(),
+      movementState: 'STATIONARY',
+      metrics: {
+        accelMagnitude: 1.00,
+        pitch: 1.0,
+        roll: 0.0,
+      },
+    };
+
+    return await sensorService.ingestTelemetry(payload);
+  }
+
+  /**
+   * Scenario 3: Sitting Down (Deterministic)
+   * Minor acceleration perturbation (~1.22G) settling into resting tilt
+   */
+  async simulateSit(patientId) {
+    const { patient, deviceId } = await this.resolvePatientAndDevice(patientId);
+    const sequenceNumber = await this.getNextSequence(deviceId);
+
+    const payload = {
+      deviceId,
+      patientId: patient._id,
+      sequenceNumber,
+      timestamp: new Date(),
+      movementState: 'STATIONARY',
+      metrics: {
+        accelMagnitude: 1.15,
+        pitch: 22.0,
+        roll: 3.5,
+      },
+    };
+
+    return await sensorService.ingestTelemetry(payload);
+  }
+
+  /**
+   * Scenario 4: Sudden Movement (Deterministic)
+   * Rapid postural shift or turn (accel ~ 2.15G) without freefall -> Normal movement
+   */
+  async simulateSuddenMovement(patientId) {
+    const { patient, deviceId } = await this.resolvePatientAndDevice(patientId);
+    const sequenceNumber = await this.getNextSequence(deviceId);
+
+    const payload = {
+      deviceId,
+      patientId: patient._id,
+      sequenceNumber,
+      timestamp: new Date(),
+      movementState: 'WALKING',
+      metrics: {
+        accelMagnitude: 2.15,
+        pitch: 18.0,
+        roll: -15.0,
+      },
+    };
+
+    return await sensorService.ingestTelemetry(payload);
+  }
+
+  /**
+   * Scenario 6: Impact Without Freefall (Trip / Stumble / Bed Drop)
+   * High impact spike (> 2.8G) without a preceding free-fall stage -> Rejection / False Positive
+   */
+  async simulateImpactOnly(patientId) {
+    const { patient, deviceId } = await this.resolvePatientAndDevice(patientId);
+    const sequenceNumber = await this.getNextSequence(deviceId);
+
+    const payload = {
+      deviceId,
+      patientId: patient._id,
+      sequenceNumber,
+      timestamp: new Date(),
+      movementState: 'FALL_IMPACT',
+      metrics: {
+        accelMagnitude: 3.45,
+        pitch: 35.0,
+        roll: -20.0,
+      },
+    };
+
+    return await sensorService.ingestTelemetry(payload);
+  }
+
+  /**
+   * Scenario 8: Hardware Fault - Sensor Disconnection
+   */
+  async simulateSensorDisconnection(patientId) {
+    const { patient, deviceId } = await this.resolvePatientAndDevice(patientId);
+    return await hardwareFaultService.recordFault({
+      deviceId,
+      faultType: 'SENSOR_DISCONNECTED',
+      severity: 'CRITICAL',
+      details: `Simulated sensor detachment / wire disconnection for patient ${patient.name}`,
+    });
+  }
+
+  /**
+   * Scenario 9: Hardware Fault - Abnormal Sensor Values
+   */
+  async simulateAbnormalValues(patientId) {
+    const { patient, deviceId } = await this.resolvePatientAndDevice(patientId);
+    return await hardwareFaultService.recordFault({
+      deviceId,
+      faultType: 'INVALID_READINGS',
+      severity: 'WARNING',
+      details: `Simulated ADC upper-rail saturation / abnormal voltage reading (1023 max ADC)`,
+    });
+  }
+
+  /**
+   * Scenario 10: Hardware Fault - Communication Interruption
+   */
+  async simulateCommInterruption(patientId) {
+    const { patient, deviceId } = await this.resolvePatientAndDevice(patientId);
+    return await hardwareFaultService.recordFault({
+      deviceId,
+      faultType: 'MISSING_PACKETS',
+      severity: 'WARNING',
+      details: `Simulated RF/Serial connection loss (telemetry packets interrupted > 3.5s)`,
+    });
+  }
+
+  /**
+   * Scenario: Recover Simulated Faults
+   */
+  async simulateFaultRecovery(patientId, faultType = null) {
+    const { deviceId } = await this.resolvePatientAndDevice(patientId);
+    if (faultType) {
+      return await hardwareFaultService.recordRecovery(deviceId, faultType, 'Simulated manual sensor reconnect & reset');
+    }
+    const types = ['SENSOR_DISCONNECTED', 'INVALID_READINGS', 'MISSING_PACKETS', 'SERIAL_COMM_FAILURE', 'SENSOR_SATURATED'];
+    for (const t of types) {
+      await hardwareFaultService.recordRecovery(deviceId, t, 'Batch fault recovery');
+    }
+    return { success: true, message: 'All active faults recovered for ' + deviceId };
+  }
+
+  /**
+   * Scenario: Inactivity Simulation (Deterministic)
    * Produces motionless readings; updates status badge to STATIONARY only, NO alert!
    */
   async simulateInactivity(patientId) {

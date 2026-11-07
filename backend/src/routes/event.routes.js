@@ -8,6 +8,7 @@ router.get('/stream', authenticate, (req, res) => eventController.streamEvents(r
 
 // Protected telemetry history
 router.get('/history', authenticate, (req, res, next) => eventController.getHistory(req, res, next));
+router.get('/unified-history', authenticate, (req, res, next) => eventController.getUnifiedHistory(req, res, next));
 
 // Telemetry ingestion endpoint
 router.post('/', (req, res, next) => eventController.ingestEvent(req, res, next));

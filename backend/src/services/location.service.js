@@ -2,13 +2,14 @@ const mongoose = require('mongoose');
 const locationRepository = require('../repositories/location.repository');
 const patientRepository = require('../repositories/patient.repository');
 const sseManager = require('../sockets/sse.manager');
+const auditService = require('./audit.service');
 
 class LocationService {
   /**
    * Record a new patient indoor location event
    */
-  async recordLocation(data) {
-    let { patientId, roomNumber, bedNumber, wardId, timestamp } = data;
+  async recordLocation(data, staff = null) {
+    let { patientId, roomNumber, bedNumber, wardId, floor, status, source, timestamp } = data;
 
     // 1. Validate patientId
     if (!patientId) {
@@ -38,9 +39,16 @@ class LocationService {
     }
     roomNumber = roomNumber.trim();
 
-    // 3. Normalize bedNumber and wardId
+    // 3. Normalize bedNumber, wardId, floor, status, source
     bedNumber = typeof bedNumber === 'string' ? bedNumber.trim() : '';
     wardId = typeof wardId === 'string' && wardId.trim() ? wardId.trim().toUpperCase() : patient.wardId || 'WARD-3B';
+    floor = typeof floor === 'string' && floor.trim() ? floor.trim() : patient.floor || 'Floor 3';
+    status = typeof status === 'string' && ['ASSIGNED', 'LOCATION_UPDATED', 'UNKNOWN', 'NOT_AVAILABLE'].includes(status)
+      ? status
+      : 'LOCATION_UPDATED';
+    source = typeof source === 'string' && ['MANUAL', 'BLE_BEACON', 'WIFI_TRIANGULATION', 'GPS', 'UWB', 'SENSOR_DERIVED'].includes(source)
+      ? source
+      : 'MANUAL';
 
     // 4. Validate timestamp
     let eventTimestamp = new Date();
@@ -55,20 +63,21 @@ class LocationService {
     }
 
     // 5. Prevent unnecessary duplicate location events
-    // Check both the latest persisted location event and patient's current room/bed
     const latestEvent = await locationRepository.findLatestByPatientId(patient._id);
     const isSameAsLatestEvent =
       latestEvent &&
       latestEvent.roomNumber === roomNumber &&
-      (latestEvent.bedNumber || '') === bedNumber;
+      (latestEvent.bedNumber || '') === bedNumber &&
+      (latestEvent.floor || 'Floor 3') === floor;
 
     const isSameAsPatientCurrent =
       patient.roomNumber === roomNumber &&
-      (patient.bedNumber || '') === bedNumber;
+      (patient.bedNumber || '') === bedNumber &&
+      (patient.floor || 'Floor 3') === floor;
 
     if (isSameAsLatestEvent || (!latestEvent && isSameAsPatientCurrent)) {
       const err = new Error(
-        `Duplicate location event: patient "${patient.name}" is already at Room ${roomNumber}, Bed ${bedNumber || 'N/A'}`
+        `Duplicate location event: patient "${patient.name}" is already at ${floor}, Room ${roomNumber}, Bed ${bedNumber || 'N/A'}`
       );
       err.statusCode = 400;
       err.duplicate = true;
@@ -81,23 +90,51 @@ class LocationService {
       roomNumber,
       bedNumber,
       wardId,
+      floor,
+      status,
+      source,
+      updatedBy: staff?._id || null,
       timestamp: eventTimestamp,
     });
 
-    // 7. Update Patient current room/bed and lastLocationUpdate
+    // 7. Update Patient current room/bed/floor and lastLocationUpdate
     const updatedPatient = await patientRepository.updateLocation(patient._id, {
       roomNumber,
       bedNumber,
       wardId,
+      floor,
+      locationStatus: status,
+      locationSource: source,
     });
 
-    // 8. Broadcast location_updated via existing SSE manager
+    // 8. Log administrative action if staff is provided
+    if (staff) {
+      await auditService.logAction({
+        action: 'RELOCATE_PATIENT',
+        staff,
+        targetType: 'PATIENT',
+        targetId: patient._id,
+        targetName: patient.name,
+        details: {
+          previousLocation: `${patient.floor || 'Floor 3'} Rm ${patient.roomNumber} ${patient.bedNumber}`,
+          newLocation: `${floor} Rm ${roomNumber} ${bedNumber}`,
+          wardId,
+          status,
+          source,
+        },
+      });
+    }
+
+    // 9. Broadcast location_updated via existing SSE manager
     sseManager.broadcast('location_updated', {
       patientId: patient._id,
       patientName: patient.name,
       roomNumber,
       bedNumber,
       wardId,
+      floor,
+      status,
+      source,
       timestamp: locationEvent.timestamp,
       locationEventId: locationEvent._id,
     });
@@ -107,6 +144,10 @@ class LocationService {
       patientId: patient._id,
       roomNumber,
       bedNumber,
+      wardId,
+      floor,
+      locationStatus: status,
+      locationSource: source,
       lastLocationUpdate: locationEvent.timestamp,
       timestamp: new Date(),
     });

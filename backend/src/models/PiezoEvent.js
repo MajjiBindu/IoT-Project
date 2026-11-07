@@ -52,6 +52,15 @@ const PiezoEventSchema = new mongoose.Schema(
       enum: ['ACTIVE', 'INACTIVE', 'SENSOR_CHECK'],
       required: true,
     },
+    severity: {
+      type: String,
+      enum: ['NORMAL', 'WARNING', 'CRITICAL'],
+      default: 'NORMAL',
+    },
+    source: {
+      type: String,
+      default: 'REAL_HARDWARE',
+    },
     timestamp: {
       type: Date,
       default: Date.now,

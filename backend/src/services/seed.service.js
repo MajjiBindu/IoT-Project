@@ -6,62 +6,98 @@ const Staff = require('../models/Staff');
 const SYNTHETIC_PATIENTS = [
   {
     name: 'Eleanor Vance (Synthetic)',
+    age: 78,
+    gender: 'FEMALE',
+    floor: 'Floor 3',
     roomNumber: '101',
     bedNumber: 'Bed-A',
     wardId: 'WARD-3B',
     status: 'ADMITTED',
     movementStatus: 'STATIONARY',
-    assignedDeviceId: 'SIM-TAG-01',
-    notes: 'Post-op knee recovery. High fall risk protocol.',
+    assignedDeviceId: 'ARDUINO-PIEZO-01',
+    fallRiskLevel: 'HIGH',
+    locationStatus: 'Assigned',
+    locationSource: 'MANUAL',
+    notes: 'Post-op knee recovery. High fall risk protocol. Connected to physical Arduino piezo monitor.',
   },
   {
     name: 'Marcus Holloway (Synthetic)',
+    age: 64,
+    gender: 'MALE',
+    floor: 'Floor 3',
     roomNumber: '101',
     bedNumber: 'Bed-B',
     wardId: 'WARD-3B',
     status: 'ADMITTED',
     movementStatus: 'WALKING',
     assignedDeviceId: 'SIM-TAG-02',
+    fallRiskLevel: 'MEDIUM',
+    locationStatus: 'Assigned',
+    locationSource: 'MANUAL',
     notes: 'Assisted ambulation encouraged.',
   },
   {
     name: 'Sarah Connor (Synthetic)',
+    age: 58,
+    gender: 'FEMALE',
+    floor: 'Floor 3',
     roomNumber: '102',
     bedNumber: 'Bed-A',
     wardId: 'WARD-3B',
     status: 'ADMITTED',
     movementStatus: 'STATIONARY',
     assignedDeviceId: 'SIM-TAG-03',
+    fallRiskLevel: 'HIGH',
+    locationStatus: 'Assigned',
+    locationSource: 'MANUAL',
     notes: 'Mild cognitive disorientation during night.',
   },
   {
     name: 'Arthur Dent (Synthetic)',
+    age: 42,
+    gender: 'MALE',
+    floor: 'Floor 3',
     roomNumber: '102',
     bedNumber: 'Bed-B',
     wardId: 'WARD-3B',
     status: 'ADMITTED',
     movementStatus: 'WALKING',
     assignedDeviceId: 'SIM-TAG-04',
+    fallRiskLevel: 'LOW',
+    locationStatus: 'Assigned',
+    locationSource: 'MANUAL',
     notes: 'Recovering nicely, frequent hallway walking.',
   },
   {
     name: 'Elena Fisher (Synthetic)',
+    age: 39,
+    gender: 'FEMALE',
+    floor: 'Floor 3',
     roomNumber: '103',
     bedNumber: 'Bed-A',
     wardId: 'WARD-3B',
     status: 'ADMITTED',
     movementStatus: 'STATIONARY',
     assignedDeviceId: 'SIM-TAG-05',
+    fallRiskLevel: 'LOW',
+    locationStatus: 'Assigned',
+    locationSource: 'MANUAL',
     notes: 'Monitored bed rest.',
   },
   {
     name: 'Garrus Vakarian (Synthetic)',
+    age: 71,
+    gender: 'MALE',
+    floor: 'Floor 3',
     roomNumber: '103',
     bedNumber: 'Bed-B',
     wardId: 'WARD-3B',
     status: 'ADMITTED',
     movementStatus: 'STATIONARY',
     assignedDeviceId: 'SIM-TAG-06',
+    fallRiskLevel: 'HIGH',
+    locationStatus: 'Assigned',
+    locationSource: 'MANUAL',
     notes: 'Calibration underway.',
   },
 ];
@@ -124,7 +160,11 @@ async function seedSyntheticData() {
       }
 
       // Seed Patients and link device
+      const defaultNurse = await Staff.findOne({ role: 'NURSE' });
       for (const p of SYNTHETIC_PATIENTS) {
+        if (defaultNurse && (p.name.includes('Eleanor') || p.name.includes('Marcus') || p.name.includes('Arthur'))) {
+          p.assignedNurseId = defaultNurse._id;
+        }
         const patient = await Patient.create(p);
         const matchedDevice = createdDevices.find((d) => d.deviceCode === p.assignedDeviceId);
         if (matchedDevice) {
@@ -137,6 +177,9 @@ async function seedSyntheticData() {
           roomNumber: p.roomNumber,
           bedNumber: p.bedNumber,
           wardId: p.wardId || 'WARD-3B',
+          floor: p.floor || 'Floor 3',
+          status: p.locationStatus || 'Assigned',
+          source: p.locationSource || 'MANUAL',
           timestamp: new Date(Date.now() - 3600000), // 1 hour ago
         });
       }
@@ -147,32 +190,82 @@ async function seedSyntheticData() {
     } else {
       console.log(`[Seed] Existing dataset found (${patientCount} patients). Checking location events...`);
 
+      const defaultNurse = await Staff.findOne({ role: 'NURSE' });
+
+      // Backfill missing fields in existing patients (fallRiskLevel, age, gender, assignedNurseId, floor)
+      const existingPatients = await Patient.find();
+      for (const p of existingPatients) {
+        let changed = false;
+        if (!p.fallRiskLevel) {
+          p.fallRiskLevel = p.name.includes('Eleanor') || p.name.includes('Sarah') ? 'HIGH' : 'LOW';
+          changed = true;
+        }
+        if (!p.age) {
+          p.age = p.name.includes('Eleanor') ? 78 : p.name.includes('Marcus') ? 64 : 45;
+          changed = true;
+        }
+        if (!p.gender) {
+          p.gender = p.name.includes('Eleanor') || p.name.includes('Sarah') || p.name.includes('Elena') ? 'FEMALE' : 'MALE';
+          changed = true;
+        }
+        if (!p.floor) {
+          p.floor = 'Floor 3';
+          changed = true;
+        }
+        if (!p.locationStatus) {
+          p.locationStatus = 'Assigned';
+          changed = true;
+        }
+        if (!p.locationSource) {
+          p.locationSource = 'MANUAL';
+          changed = true;
+        }
+        if (!p.assignedNurseId && defaultNurse) {
+          p.assignedNurseId = defaultNurse._id;
+          changed = true;
+        }
+        // If Eleanor Vance is in DB, ensure ARDUINO-PIEZO-01 is assigned
+        if (p.name.includes('Eleanor') && (!p.assignedDeviceId || p.assignedDeviceId === 'SIM-TAG-01')) {
+          p.assignedDeviceId = 'ARDUINO-PIEZO-01';
+          changed = true;
+        }
+        if (changed) {
+          await p.save();
+        }
+      }
+
       // If existing database has patients but no location events, backfill baseline locations
       const locationCount = await LocationEvent.countDocuments();
       if (locationCount === 0) {
-        const existingPatients = await Patient.find();
         for (const p of existingPatients) {
           await LocationEvent.create({
             patientId: p._id,
             roomNumber: p.roomNumber,
             bedNumber: p.bedNumber,
             wardId: p.wardId || 'WARD-3B',
+            floor: p.floor || 'Floor 3',
+            status: p.locationStatus || 'Assigned',
+            source: p.locationSource || 'MANUAL',
             timestamp: p.lastLocationUpdate || p.updatedAt || new Date(),
           });
         }
         console.log(`[Seed] Backfilled ${existingPatients.length} baseline location events.`);
       }
 
-      // Ensure ARDUINO-PIEZO-01 device exists
-      const arduinoDevice = await Device.findOne({ deviceCode: 'ARDUINO-PIEZO-01' });
+      // Ensure ARDUINO-PIEZO-01 device exists and is linked
+      let arduinoDevice = await Device.findOne({ deviceCode: 'ARDUINO-PIEZO-01' });
+      const eleanorPatient = await Patient.findOne({ name: { $regex: /Eleanor/i } });
       if (!arduinoDevice) {
-        await Device.create({
+        arduinoDevice = await Device.create({
           deviceCode: 'ARDUINO-PIEZO-01',
           batteryLevel: 100,
           status: 'ACTIVE',
-          assignedPatientId: null,
+          assignedPatientId: eleanorPatient ? eleanorPatient._id : null,
         });
         console.log('[Seed] Registered default ARDUINO-PIEZO-01 device.');
+      } else if (!arduinoDevice.assignedPatientId && eleanorPatient) {
+        arduinoDevice.assignedPatientId = eleanorPatient._id;
+        await arduinoDevice.save();
       }
     }
   } catch (err) {

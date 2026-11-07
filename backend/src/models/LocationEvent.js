@@ -22,6 +22,26 @@ const LocationEventSchema = new mongoose.Schema(
       default: 'WARD-3B',
       trim: true,
     },
+    floor: {
+      type: String,
+      default: 'Floor 3',
+      trim: true,
+    },
+    status: {
+      type: String,
+      enum: ['ASSIGNED', 'LOCATION_UPDATED', 'UNKNOWN', 'NOT_AVAILABLE'],
+      default: 'LOCATION_UPDATED',
+    },
+    source: {
+      type: String,
+      enum: ['MANUAL', 'BLE_BEACON', 'WIFI_TRIANGULATION', 'GPS', 'UWB', 'SENSOR_DERIVED'],
+      default: 'MANUAL',
+    },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Staff',
+      default: null,
+    },
     timestamp: {
       type: Date,
       default: Date.now,

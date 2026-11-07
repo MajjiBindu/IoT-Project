@@ -8,6 +8,8 @@ router.use(authenticate);
 
 // View status: ADMIN or NURSE
 router.get('/status', (req, res, next) => serialController.getStatus(req, res, next));
+router.get('/history', (req, res, next) => serialController.getHistory(req, res, next));
+router.get('/faults', (req, res, next) => serialController.getFaults(req, res, next));
 
 // Trigger reconnect: ADMIN only
 router.post('/reconnect', authorize('ADMIN'), (req, res, next) => serialController.reconnect(req, res, next));

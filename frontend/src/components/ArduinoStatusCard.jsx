@@ -9,12 +9,16 @@ export const ArduinoStatusCard = () => {
   const [loading, setLoading] = useState(true);
   const [reconnecting, setReconnecting] = useState(false);
   const [diagnosticWarning, setDiagnosticWarning] = useState(null);
+  const [activeFaults, setActiveFaults] = useState([]);
   const { isAdmin } = useAuth();
 
   const fetchStatus = async () => {
     try {
       setLoading(true);
-      const res = await apiClient.getSerialStatus();
+      const [res, faultsRes] = await Promise.all([
+        apiClient.getSerialStatus(),
+        apiClient.getSerialFaults().catch(() => ({ success: false, data: [] })),
+      ]);
       if (res && res.success) {
         setStatusData(res.data);
         if (res.data.lastSensorStatus === 'SENSOR_CHECK') {
@@ -22,6 +26,9 @@ export const ArduinoStatusCard = () => {
         } else {
           setDiagnosticWarning(null);
         }
+      }
+      if (faultsRes && faultsRes.success && Array.isArray(faultsRes.data)) {
+        setActiveFaults(faultsRes.data);
       }
     } catch (err) {
       console.warn('[ArduinoStatusCard] Could not fetch serial status:', err.message);
@@ -91,11 +98,25 @@ export const ArduinoStatusCard = () => {
       setDiagnosticWarning(diag.message || 'Sensor diagnostic inspection required.');
     });
 
+    // Listen to hardware fault events
+    const unsubFault = sseClient.on('hardware_fault', (fault) => {
+      console.warn('[ArduinoStatusCard] SSE hardware_fault received:', fault);
+      setActiveFaults((prev) => [fault, ...prev.filter((f) => f._id !== fault._id)]);
+    });
+
+    // Listen to hardware recovery events
+    const unsubRecovery = sseClient.on('hardware_recovered', (rec) => {
+      console.log('[ArduinoStatusCard] SSE hardware_recovered received:', rec);
+      setActiveFaults((prev) => prev.filter((f) => f.faultType !== rec.faultType));
+    });
+
     return () => {
       unsubReconnect();
       unsubStatus();
       unsubTelemetry();
       unsubDiagnostic();
+      unsubFault();
+      unsubRecovery();
     };
   }, []);
 
@@ -362,6 +383,33 @@ export const ArduinoStatusCard = () => {
         >
           <AlertTriangle size={15} style={{ flexShrink: 0 }} />
           <span>{diagnosticWarning}</span>
+        </div>
+      )}
+
+      {/* Active Hardware Faults Banner */}
+      {activeFaults.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            padding: '10px 14px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid rgba(239, 68, 68, 0.35)',
+            color: '#f87171',
+            fontSize: '0.8rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}>
+            <AlertTriangle size={15} color="#ef4444" />
+            <span>Active Hardware Fault Detection:</span>
+          </div>
+          {activeFaults.map((fault) => (
+            <div key={fault._id || fault.faultType} style={{ paddingLeft: '23px', fontSize: '0.76rem', color: '#fca5a5' }}>
+              &bull; <strong>{fault.faultType}</strong> ({fault.severity}): {fault.details || 'Hardware telemetry disruption detected'}
+            </div>
+          ))}
         </div>
       )}
     </div>

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Activity, ShieldAlert, Moon, Footprints, AlertTriangle, Play, BedDouble } from 'lucide-react';
+import { Activity, ShieldAlert, Moon, Footprints, AlertTriangle, Play, BedDouble, UserCheck, MapPin } from 'lucide-react';
 import { usePatients } from '../../context/PatientContext';
 import { useAlerts } from '../../context/AlertContext';
+import { useAuth } from '../../context/AuthContext';
 import { StatusBadge } from '../../components/StatusBadge';
 import { apiClient } from '../../services/apiClient';
 import { AcknowledgeModal } from '../../components/AcknowledgeModal';
@@ -10,8 +11,17 @@ import { ArduinoStatusCard } from '../../components/ArduinoStatusCard';
 export const Dashboard = () => {
   const { patients, loading: patientsLoading, error: patientsError, refreshPatients } = usePatients();
   const { activeAlerts } = useAlerts();
+  const { user, isAdmin, isNurse } = useAuth();
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [actionFeedback, setActionFeedback] = useState(null);
+
+  // If nurse, calculate assigned patients
+  const myAssignedPatients = isNurse && user?._id
+    ? patients.filter((p) => {
+        const nurseId = p.assignedNurseId?._id || p.assignedNurseId;
+        return nurseId === user._id;
+      })
+    : patients;
 
   const walkingCount = patients.filter((p) => p.movementStatus === 'WALKING').length;
   const stationaryCount = patients.filter((p) => p.movementStatus === 'STATIONARY').length;
@@ -171,15 +181,49 @@ export const Dashboard = () => {
                           fontSize: '0.75rem',
                           fontFamily: 'var(--font-mono)',
                           color: 'var(--text-muted)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
                         }}
                       >
-                        ROOM {patient.roomNumber} &bull; {patient.bedNumber}
+                        <MapPin size={11} color="#0ea5e9" />
+                        ROOM {patient.roomNumber} &bull; {patient.bedNumber} ({patient.floor || 'Floor 3'})
                       </span>
                       <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginTop: '2px' }}>
                         {patient.name}
                       </h3>
                     </div>
                     <StatusBadge status={patient.movementStatus} type="movement" />
+                  </div>
+
+                  {/* Fall Risk & Nurse Info */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem' }}>
+                    <span
+                      style={{
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        fontWeight: 700,
+                        fontSize: '0.7rem',
+                        background:
+                          patient.fallRiskLevel === 'HIGH'
+                            ? 'rgba(239, 68, 68, 0.2)'
+                            : patient.fallRiskLevel === 'MEDIUM'
+                            ? 'rgba(245, 158, 11, 0.2)'
+                            : 'rgba(16, 185, 129, 0.2)',
+                        color:
+                          patient.fallRiskLevel === 'HIGH'
+                            ? '#f87171'
+                            : patient.fallRiskLevel === 'MEDIUM'
+                            ? '#fbbf24'
+                            : '#34d399',
+                      }}
+                    >
+                      {patient.fallRiskLevel || 'MEDIUM'} RISK
+                    </span>
+                    <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <UserCheck size={12} color="#0ea5e9" />
+                      {patient.assignedNurseId?.fullName || (patient.assignedNurseId ? 'Assigned' : 'Unassigned')}
+                    </span>
                   </div>
 
                   {/* Device & Notes */}
@@ -214,41 +258,58 @@ export const Dashboard = () => {
                     )}
                   </div>
 
-                  {/* Quick Simulation Triggers for this Patient */}
-                  <div
-                    style={{
-                      marginTop: 'auto',
-                      paddingTop: '10px',
-                      borderTop: '1px solid var(--border-subtle)',
-                      display: 'flex',
-                      gap: '6px',
-                    }}
-                  >
-                    <button
-                      onClick={() => handleQuickTrigger('walk', patient._id, patient.name)}
-                      className="btn btn-sm btn-secondary"
-                      style={{ flex: 1, fontSize: '0.75rem', padding: '5px' }}
-                      title="Inject deterministic walking pattern"
+                  {/* Quick Simulation Triggers for this Patient (ADMIN ONLY) */}
+                  {isAdmin ? (
+                    <div
+                      style={{
+                        marginTop: 'auto',
+                        paddingTop: '10px',
+                        borderTop: '1px solid var(--border-subtle)',
+                        display: 'flex',
+                        gap: '6px',
+                      }}
                     >
-                      <Play size={12} /> Walk
-                    </button>
-                    <button
-                      onClick={() => handleQuickTrigger('inactivity', patient._id, patient.name)}
-                      className="btn btn-sm btn-secondary"
-                      style={{ flex: 1, fontSize: '0.75rem', padding: '5px' }}
-                      title="Inject inactivity (updates badge only, no alert)"
+                      <button
+                        onClick={() => handleQuickTrigger('walk', patient._id, patient.name)}
+                        className="btn btn-sm btn-secondary"
+                        style={{ flex: 1, fontSize: '0.75rem', padding: '5px' }}
+                        title="Inject deterministic walking pattern"
+                      >
+                        <Play size={12} /> Walk
+                      </button>
+                      <button
+                        onClick={() => handleQuickTrigger('inactivity', patient._id, patient.name)}
+                        className="btn btn-sm btn-secondary"
+                        style={{ flex: 1, fontSize: '0.75rem', padding: '5px' }}
+                        title="Inject inactivity (updates badge only, no alert)"
+                      >
+                        <Moon size={12} /> Inactive
+                      </button>
+                      <button
+                        onClick={() => handleQuickTrigger('fall', patient._id, patient.name)}
+                        className="btn btn-sm btn-danger"
+                        style={{ flex: 1, fontSize: '0.75rem', padding: '5px' }}
+                        title="Inject simulated fall impact (triggers CRITICAL alert)"
+                      >
+                        <AlertTriangle size={12} /> Fall
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        marginTop: 'auto',
+                        paddingTop: '8px',
+                        borderTop: '1px solid var(--border-subtle)',
+                        fontSize: '0.72rem',
+                        color: 'var(--text-muted)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                      }}
                     >
-                      <Moon size={12} /> Inactive
-                    </button>
-                    <button
-                      onClick={() => handleQuickTrigger('fall', patient._id, patient.name)}
-                      className="btn btn-sm btn-danger"
-                      style={{ flex: 1, fontSize: '0.75rem', padding: '5px' }}
-                      title="Inject simulated fall impact (triggers CRITICAL alert)"
-                    >
-                      <AlertTriangle size={12} /> Fall
-                    </button>
-                  </div>
+                      <span>Location: {patient.locationStatus || 'Assigned'}</span>
+                      <span>Source: {patient.locationSource || 'MANUAL'}</span>
+                    </div>
+                  )}
                 </div>
               );
             })}

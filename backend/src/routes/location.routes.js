@@ -12,7 +12,7 @@ router.get('/patient/:patientId', (req, res, next) => locationController.getPati
 router.get('/patient/:patientId/current', (req, res, next) => locationController.getPatientCurrent(req, res, next));
 router.get('/ward/:wardId', (req, res, next) => locationController.getWardLocations(req, res, next));
 
-// Record relocation: ADMIN or NURSE
-router.post('/', authorize('ADMIN', 'NURSE'), (req, res, next) => locationController.recordLocation(req, res, next));
+// Record relocation: ADMIN only
+router.post('/', authorize('ADMIN'), (req, res, next) => locationController.recordLocation(req, res, next));
 
 module.exports = router;

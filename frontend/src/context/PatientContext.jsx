@@ -69,7 +69,42 @@ export const PatientProvider = ({ children }) => {
                 roomNumber: loc.roomNumber,
                 bedNumber: loc.bedNumber,
                 wardId: loc.wardId || p.wardId,
+                floor: loc.floor || p.floor,
+                locationStatus: loc.status || p.locationStatus,
+                locationSource: loc.source || p.locationSource,
                 lastLocationUpdate: loc.timestamp || new Date(),
+              }
+            : p
+        )
+      );
+    });
+
+    // Listen for nurse assignment updates
+    const unsubNurse = sseClient.on('patient_assigned_nurse', (data) => {
+      console.log('[PatientContext] SSE patient_assigned_nurse received:', data);
+      setPatients((prev) =>
+        prev.map((p) =>
+          p._id === data.patientId
+            ? {
+                ...p,
+                assignedNurseId: data.nurse,
+              }
+            : p
+        )
+      );
+    });
+
+    // Listen for patient discharge updates
+    const unsubDischarge = sseClient.on('patient_discharged', (data) => {
+      console.log('[PatientContext] SSE patient_discharged received:', data);
+      setPatients((prev) =>
+        prev.map((p) =>
+          p._id === data.patientId
+            ? {
+                ...p,
+                status: 'DISCHARGED',
+                assignedDeviceId: null,
+                dischargedAt: data.dischargedAt,
               }
             : p
         )
@@ -80,6 +115,8 @@ export const PatientProvider = ({ children }) => {
       unsubReconnect();
       unsubStatus();
       unsubLocation();
+      unsubNurse();
+      unsubDischarge();
     };
   }, [fetchPatients]);
 

@@ -42,7 +42,7 @@ class LocationController {
 
   async recordLocation(req, res, next) {
     try {
-      const result = await locationService.recordLocation(req.body);
+      const result = await locationService.recordLocation(req.body, req.staff);
       res.status(201).json({
         success: true,
         message: 'Location event recorded successfully',

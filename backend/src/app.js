@@ -14,6 +14,7 @@ const alertRoutes = require('./routes/alert.routes');
 const simulatorRoutes = require('./routes/simulator.routes');
 const eventRoutes = require('./routes/event.routes');
 const serialRoutes = require('./routes/serial.routes');
+const auditRoutes = require('./routes/audit.routes');
 const serialBridgeService = require('./services/serialBridge.service');
 const errorHandler = require('./middleware/errorHandler');
 
@@ -62,6 +63,7 @@ app.use('/api/alerts', alertRoutes);
 app.use('/api/simulator', simulatorRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/serial', serialRoutes);
+app.use('/api/audit-logs', auditRoutes);
 
 // Error Handler
 app.use(errorHandler);

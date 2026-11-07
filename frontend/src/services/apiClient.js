@@ -103,8 +103,10 @@ export const apiClient = {
   },
 
   // Patients
-  async getPatients() {
-    return await customFetch('/patients');
+  async getPatients(filters = {}) {
+    const query = new URLSearchParams(filters).toString();
+    const endpoint = query ? `/patients?${query}` : '/patients';
+    return await customFetch(endpoint);
   },
 
   async getPatient(id) {
@@ -122,6 +124,19 @@ export const apiClient = {
     return await customFetch(`/patients/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  },
+
+  async assignNurse(patientId, nurseId) {
+    return await customFetch(`/patients/${patientId}/assign-nurse`, {
+      method: 'PATCH',
+      body: JSON.stringify({ nurseId }),
+    });
+  },
+
+  async dischargePatient(patientId) {
+    return await customFetch(`/patients/${patientId}/discharge`, {
+      method: 'PATCH',
     });
   },
 
@@ -228,6 +243,27 @@ export const apiClient = {
     });
   },
 
+  async simulateStand(patientId) {
+    return await customFetch('/simulator/stand', {
+      method: 'POST',
+      body: JSON.stringify({ patientId }),
+    });
+  },
+
+  async simulateSit(patientId) {
+    return await customFetch('/simulator/sit', {
+      method: 'POST',
+      body: JSON.stringify({ patientId }),
+    });
+  },
+
+  async simulateSuddenMovement(patientId) {
+    return await customFetch('/simulator/sudden-movement', {
+      method: 'POST',
+      body: JSON.stringify({ patientId }),
+    });
+  },
+
   async simulateInactivity(patientId) {
     return await customFetch('/simulator/inactivity', {
       method: 'POST',
@@ -244,6 +280,13 @@ export const apiClient = {
 
   async simulateImpact(patientId) {
     return await customFetch('/simulator/impact', {
+      method: 'POST',
+      body: JSON.stringify({ patientId }),
+    });
+  },
+
+  async simulateImpactOnly(patientId) {
+    return await customFetch('/simulator/impact-only', {
       method: 'POST',
       body: JSON.stringify({ patientId }),
     });
@@ -284,6 +327,34 @@ export const apiClient = {
     });
   },
 
+  async simulateSensorDisconnection(patientId) {
+    return await customFetch('/simulator/fault/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({ patientId }),
+    });
+  },
+
+  async simulateAbnormalValues(patientId) {
+    return await customFetch('/simulator/fault/abnormal-values', {
+      method: 'POST',
+      body: JSON.stringify({ patientId }),
+    });
+  },
+
+  async simulateCommInterruption(patientId) {
+    return await customFetch('/simulator/fault/comm-interruption', {
+      method: 'POST',
+      body: JSON.stringify({ patientId }),
+    });
+  },
+
+  async simulateFaultRecovery(patientId, faultType = null) {
+    return await customFetch('/simulator/fault/recover', {
+      method: 'POST',
+      body: JSON.stringify({ patientId, faultType }),
+    });
+  },
+
   async getSimulatorStatus() {
     return await customFetch('/simulator/status');
   },
@@ -295,12 +366,17 @@ export const apiClient = {
     });
   },
 
-  // Telemetry History
+  // Telemetry & Unified History
   async getTelemetryHistory(patientId, limit = 50) {
     const params = new URLSearchParams();
     if (patientId) params.append('patientId', patientId);
     if (limit) params.append('limit', limit);
     return await customFetch(`/events/history?${params.toString()}`);
+  },
+
+  async getUnifiedHistory(filters = {}) {
+    const params = new URLSearchParams(filters);
+    return await customFetch(`/events/unified-history?${params.toString()}`);
   },
 
   // Health and DB connectivity
@@ -313,9 +389,23 @@ export const apiClient = {
     return await customFetch('/serial/status');
   },
 
+  async getSerialHistory(limit = 100) {
+    return await customFetch(`/serial/history?limit=${limit}`);
+  },
+
+  async getSerialFaults() {
+    return await customFetch('/serial/faults');
+  },
+
   async reconnectSerial() {
     return await customFetch('/serial/reconnect', {
       method: 'POST',
     });
+  },
+
+  // Audit Logs (ADMIN only)
+  async getAuditLogs(filters = {}) {
+    const params = new URLSearchParams(filters);
+    return await customFetch(`/audit-logs?${params.toString()}`);
   },
 };

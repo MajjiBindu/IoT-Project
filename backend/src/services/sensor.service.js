@@ -4,6 +4,8 @@ const deviceRepository = require('../repositories/device.repository');
 const alertService = require('./alert.service');
 const fallDetectionService = require('./fallDetection.service');
 const sseManager = require('../sockets/sse.manager');
+const PiezoEvent = require('../models/PiezoEvent');
+const SensorEvent = require('../models/SensorEvent');
 
 class SensorService {
   constructor() {
@@ -275,6 +277,132 @@ class SensorService {
 
   async getAllEvents(query = {}, limit = 100) {
     return await eventRepository.findAll(query, limit);
+  }
+
+  async getUnifiedHistory(filters = {}) {
+    const { patientId, deviceId, eventType, source, severity, startDate, endDate, limit = 100 } = filters;
+    const maxLimit = Math.min(parseInt(limit, 10) || 100, 300);
+
+    const timeQuery = {};
+    if (startDate) timeQuery.$gte = new Date(startDate);
+    if (endDate) timeQuery.$lte = new Date(endDate);
+    const hasTimeFilter = Object.keys(timeQuery).length > 0;
+
+    const results = [];
+
+    // 1. Fetch from SensorEvent (Simulator / IMU tag)
+    if (source !== 'REAL_HARDWARE') {
+      const sQuery = {};
+      if (patientId) sQuery.patientId = patientId;
+      if (deviceId) sQuery.deviceId = deviceId;
+      if (hasTimeFilter) sQuery.timestamp = timeQuery;
+      if (severity) sQuery.severity = severity;
+
+      if (eventType) {
+        if (eventType === 'WALKING') sQuery.movementState = 'WALKING';
+        else if (eventType === 'STATIONARY') sQuery.movementState = { $in: ['STATIONARY', 'RESTING'] };
+        else if (eventType === 'IMPACT_PEAK') sQuery.movementState = 'FALL_IMPACT';
+        else if (eventType === 'FREE_FALL') sQuery.movementState = 'FREE_FALL';
+        else if (eventType === 'POSSIBLE_FALL') sQuery.movementState = { $in: ['FALL_IMPACT', 'ORIENTATION_CHANGE'] };
+      }
+
+      const sEvents = await SensorEvent.find(sQuery)
+        .populate('patientId', 'name roomNumber bedNumber')
+        .sort({ timestamp: -1 })
+        .limit(maxLimit);
+
+      for (const ev of sEvents) {
+        let normalizedType = ev.movementState;
+        if (ev.movementState === 'FALL_IMPACT') normalizedType = 'IMPACT_PEAK';
+
+        results.push({
+          _id: ev._id,
+          source: ev.source || 'SIMULATOR',
+          eventType: normalizedType,
+          timestamp: ev.timestamp,
+          deviceId: ev.deviceId,
+          patientId: ev.patientId?._id || ev.patientId,
+          patientName: ev.patientId?.name || 'Unknown Patient',
+          roomNumber: ev.patientId?.roomNumber || '',
+          bedNumber: ev.patientId?.bedNumber || '',
+          severity: ev.severity || (ev.movementState === 'FALL_IMPACT' ? 'CRITICAL' : 'NORMAL'),
+          metrics: {
+            accelMagnitude: ev.metrics?.accelMagnitude,
+            pitch: ev.metrics?.pitch,
+            roll: ev.metrics?.roll,
+            impactPeak: ev.impactPeak || (ev.movementState === 'FALL_IMPACT' ? ev.metrics?.accelMagnitude : null),
+            freefallDurationMs: ev.freefallDurationMs || 0,
+          },
+          details: `Inertial telemetry packet (Seq #${ev.sequenceNumber})`,
+        });
+      }
+    }
+
+    // 2. Fetch from PiezoEvent (Real Hardware)
+    if (source !== 'SIMULATOR') {
+      const pQuery = {};
+      if (patientId) pQuery.patientId = patientId;
+      if (deviceId) pQuery.deviceId = deviceId;
+      if (hasTimeFilter) pQuery.timestamp = timeQuery;
+      if (severity) pQuery.severity = severity;
+
+      if (eventType) {
+        if (eventType === 'VIBRATION' || eventType === 'WALKING') {
+          pQuery.event = 'MOVEMENT';
+        } else if (eventType === 'STATIONARY') {
+          pQuery.event = 'INACTIVITY';
+        } else if (eventType === 'SENSOR_CHECK') {
+          pQuery.status = 'SENSOR_CHECK';
+        }
+      }
+
+      const pEvents = await PiezoEvent.find(pQuery)
+        .populate('patientId', 'name roomNumber bedNumber')
+        .sort({ timestamp: -1 })
+        .limit(maxLimit);
+
+      for (const ev of pEvents) {
+        const normalizedType = ev.status === 'SENSOR_CHECK'
+          ? 'SENSOR_CHECK'
+          : ev.event === 'MOVEMENT'
+          ? 'VIBRATION'
+          : ev.event === 'INACTIVITY'
+          ? 'STATIONARY'
+          : 'HEARTBEAT';
+
+        const calcSeverity = ev.status === 'SENSOR_CHECK'
+          ? 'WARNING'
+          : ev.event === 'MOVEMENT'
+          ? (ev.deviation >= 120 ? 'WARNING' : 'NORMAL')
+          : 'NORMAL';
+
+        results.push({
+          _id: ev._id,
+          source: 'REAL_HARDWARE',
+          eventType: normalizedType,
+          timestamp: ev.timestamp,
+          deviceId: ev.deviceId,
+          patientId: ev.patientId?._id || ev.patientId,
+          patientName: ev.patientId?.name || 'Paired Hardware Patient',
+          roomNumber: ev.patientId?.roomNumber || '',
+          bedNumber: ev.patientId?.bedNumber || '',
+          severity: calcSeverity,
+          metrics: {
+            raw: ev.raw,
+            baseline: ev.baseline,
+            deviation: ev.deviation,
+            threshold: ev.threshold,
+            movementCount: ev.movementCount,
+            arduinoTimeMs: ev.arduinoTimeMs,
+          },
+          details: `Piezoelectric vibration event (Raw: ${ev.raw}, Dev: ${ev.deviation}, Status: ${ev.status})`,
+        });
+      }
+    }
+
+    // Sort unified collection chronologically descending
+    results.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    return results.slice(0, maxLimit);
   }
 }
 

@@ -28,6 +28,19 @@ const DeviceSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    faultStatus: {
+      type: String,
+      enum: ['HEALTHY', 'DEGRADED', 'FAULTED'],
+      default: 'HEALTHY',
+    },
+    lastFaultType: {
+      type: String,
+      default: null,
+    },
+    lastFaultAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

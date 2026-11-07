@@ -18,10 +18,12 @@ import {
 import { apiClient } from '../../services/apiClient';
 import { sseClient } from '../../services/sseClient';
 import { usePatients } from '../../context/PatientContext';
+import { useAuth } from '../../context/AuthContext';
 import { StatusBadge } from '../../components/StatusBadge';
 
 export const Locations = () => {
   const { patients, refreshPatients } = usePatients();
+  const { isAdmin } = useAuth();
 
   // Location events state
   const [locations, setLocations] = useState([]);
@@ -35,6 +37,10 @@ export const Locations = () => {
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [newRoomNumber, setNewRoomNumber] = useState('');
   const [newBedNumber, setNewBedNumber] = useState('');
+  const [newFloor, setNewFloor] = useState('Floor 3');
+  const [newWardId, setNewWardId] = useState('WARD-3B');
+  const [newStatus, setNewStatus] = useState('Location updated');
+  const [newSource, setNewSource] = useState('MANUAL');
   const [updateError, setUpdateError] = useState(null);
   const [updateLoading, setUpdateLoading] = useState(false);
 
@@ -121,10 +127,18 @@ export const Locations = () => {
       setSelectedPatientId(patient._id);
       setNewRoomNumber(patient.roomNumber || '');
       setNewBedNumber(patient.bedNumber || '');
+      setNewFloor(patient.floor || 'Floor 3');
+      setNewWardId(patient.wardId || 'WARD-3B');
+      setNewStatus(patient.locationStatus || 'Location updated');
+      setNewSource(patient.locationSource || 'MANUAL');
     } else {
       setSelectedPatientId(patients[0]?._id || '');
       setNewRoomNumber('');
       setNewBedNumber('');
+      setNewFloor('Floor 3');
+      setNewWardId('WARD-3B');
+      setNewStatus('Location updated');
+      setNewSource('MANUAL');
     }
     setIsUpdateModalOpen(true);
   };
@@ -150,7 +164,10 @@ export const Locations = () => {
         patientId: selectedPatientId,
         roomNumber: newRoomNumber.trim(),
         bedNumber: newBedNumber.trim(),
-        wardId: 'WARD-3B',
+        floor: newFloor.trim() || 'Floor 3',
+        wardId: newWardId.trim() || 'WARD-3B',
+        status: newStatus,
+        source: newSource,
       });
 
       if (res && res.success) {
@@ -283,14 +300,20 @@ export const Locations = () => {
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             <span>Refresh</span>
           </button>
-          <button
-            onClick={() => openUpdateModal()}
-            className="btn btn-primary btn-sm"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            <Plus size={16} />
-            <span>Record Location Change</span>
-          </button>
+          {isAdmin ? (
+            <button
+              onClick={() => openUpdateModal()}
+              className="btn btn-primary btn-sm"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              <Plus size={16} />
+              <span>Record Location Change</span>
+            </button>
+          ) : (
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              (Admin role required to relocate)
+            </span>
+          )}
         </div>
       </div>
 
@@ -955,26 +978,98 @@ export const Locations = () => {
                 />
               </div>
 
-              {/* New Bed Number */}
-              <div>
-                <label
-                  style={{
-                    display: 'block',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    marginBottom: '6px',
-                    color: 'var(--text-secondary)',
-                  }}
-                >
-                  NEW BED NUMBER
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Bed-A, Bed-B, Bed-1"
-                  value={newBedNumber}
-                  onChange={(e) => setNewBedNumber(e.target.value)}
-                />
+              {/* New Bed Number & Floor */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      marginBottom: '6px',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    NEW BED NUMBER
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Bed-A, Bed-B, Bed-1"
+                    value={newBedNumber}
+                    onChange={(e) => setNewBedNumber(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      marginBottom: '6px',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    FLOOR
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Floor 3, Floor 2"
+                    value={newFloor}
+                    onChange={(e) => setNewFloor(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Location Status & Source */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      marginBottom: '6px',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    LOCATION STATUS
+                  </label>
+                  <select
+                    className="form-input"
+                    value={newStatus}
+                    onChange={(e) => setNewStatus(e.target.value)}
+                  >
+                    <option value="Location updated">Location updated</option>
+                    <option value="Assigned">Assigned</option>
+                    <option value="Unknown">Unknown</option>
+                    <option value="Not available">Not available</option>
+                  </select>
+                </div>
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      marginBottom: '6px',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    LOCATION SOURCE
+                  </label>
+                  <select
+                    className="form-input"
+                    value={newSource}
+                    onChange={(e) => setNewSource(e.target.value)}
+                  >
+                    <option value="MANUAL">MANUAL (Staff entry)</option>
+                    <option value="SENSOR">SENSOR (Telemetry derived)</option>
+                    <option value="BLE">BLE Beacon</option>
+                    <option value="WIFI">Wi-Fi AP</option>
+                  </select>
+                </div>
               </div>
 
               <div

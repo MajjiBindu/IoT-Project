@@ -44,6 +44,20 @@ class EventController {
       next(err);
     }
   }
+
+  /**
+   * Unified telemetry history (GET /api/events/unified-history)
+   * Combines real hardware PiezoEvents and simulated SensorEvents with multi-criteria filtering
+   */
+  async getUnifiedHistory(req, res, next) {
+    try {
+      const filters = req.query;
+      const events = await sensorService.getUnifiedHistory(filters);
+      res.json({ success: true, count: events.length, data: events });
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 module.exports = new EventController();

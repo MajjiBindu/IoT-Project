@@ -66,6 +66,8 @@ const int RECOVERY_SAMPLE_LIMIT = 4;
 // ---------------- SENSOR VARIABLES ----------------
 
 int rawValue = 0;
+int peakAdcInWindow = 0;
+int valleyAdcInWindow = 1023;
 
 float sensorBaseline = 0;
 float movementThreshold = MIN_MOVEMENT_THRESHOLD;
@@ -361,11 +363,34 @@ void loop() {
     return;
   }
 
+  // High-frequency sub-millisecond continuous sampling
+  // Guarantees capturing 1-10ms transient piezo vibration/impact peaks
+  int currentAdc = analogRead(SENSOR_PIN);
+  if (currentAdc > peakAdcInWindow) {
+    peakAdcInWindow = currentAdc;
+  }
+  if (currentAdc < valleyAdcInWindow) {
+    valleyAdcInWindow = currentAdc;
+  }
+
   unsigned long now = millis();
 
   if (now - lastSampleTime >= SAMPLE_INTERVAL) {
     lastSampleTime = now;
-    rawValue = analogRead(SENSOR_PIN);
+
+    // Select the peak value with maximum absolute deviation from baseline
+    int devHigh = abs(peakAdcInWindow - (int)sensorBaseline);
+    int devLow = abs(valleyAdcInWindow - (int)sensorBaseline);
+    if (devHigh >= devLow) {
+      rawValue = peakAdcInWindow;
+    } else {
+      rawValue = valleyAdcInWindow;
+    }
+
+    // Reset peak tracking for next 50ms observation window
+    peakAdcInWindow = 0;
+    valleyAdcInWindow = 1023;
+
     processMovement();
   }
 }

@@ -16,6 +16,126 @@ class SimulatorController {
     }
   }
 
+  async simulateStand(req, res, next) {
+    try {
+      const { patientId } = req.body;
+      const result = await simulatorService.simulateStand(patientId);
+      res.json({
+        success: true,
+        scenario: 'STANDING',
+        message: 'Standing telemetry emitted; posture upright (STATIONARY)',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async simulateSit(req, res, next) {
+    try {
+      const { patientId } = req.body;
+      const result = await simulatorService.simulateSit(patientId);
+      res.json({
+        success: true,
+        scenario: 'SITTING',
+        message: 'Sitting down telemetry emitted; settling into resting posture',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async simulateSuddenMovement(req, res, next) {
+    try {
+      const { patientId } = req.body;
+      const result = await simulatorService.simulateSuddenMovement(patientId);
+      res.json({
+        success: true,
+        scenario: 'SUDDEN_MOVEMENT',
+        message: 'Sudden movement telemetry emitted; classified as dynamic movement without fall',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async simulateImpactOnly(req, res, next) {
+    try {
+      const { patientId } = req.body;
+      const result = await simulatorService.simulateImpactOnly(patientId);
+      res.json({
+        success: true,
+        scenario: 'IMPACT_ONLY',
+        message: 'Impact spike without prior freefall descent emitted (fall rejected / false positive protection)',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async simulateSensorDisconnection(req, res, next) {
+    try {
+      const { patientId } = req.body;
+      const result = await simulatorService.simulateSensorDisconnection(patientId);
+      res.json({
+        success: true,
+        scenario: 'FAULT_DISCONNECTED',
+        message: 'Sensor disconnection fault simulated; hardware alert dispatched',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async simulateAbnormalValues(req, res, next) {
+    try {
+      const { patientId } = req.body;
+      const result = await simulatorService.simulateAbnormalValues(patientId);
+      res.json({
+        success: true,
+        scenario: 'FAULT_ABNORMAL_VALUES',
+        message: 'Abnormal ADC sensor values / upper rail saturation simulated',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async simulateCommInterruption(req, res, next) {
+    try {
+      const { patientId } = req.body;
+      const result = await simulatorService.simulateCommInterruption(patientId);
+      res.json({
+        success: true,
+        scenario: 'FAULT_COMM_INTERRUPT',
+        message: 'Communication interruption simulated (telemetry watchdog triggered)',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async simulateFaultRecovery(req, res, next) {
+    try {
+      const { patientId, faultType } = req.body;
+      const result = await simulatorService.simulateFaultRecovery(patientId, faultType);
+      res.json({
+        success: true,
+        scenario: 'FAULT_RECOVERY',
+        message: 'Hardware fault recovery simulated; device restored to healthy state',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async simulateInactivity(req, res, next) {
     try {
       const { patientId } = req.body;
