@@ -307,4 +307,15 @@ export const apiClient = {
   async getHealth() {
     return await customFetch('/health');
   },
+
+  // USB Serial Hardware Integration
+  async getSerialStatus() {
+    return await customFetch('/serial/status');
+  },
+
+  async reconnectSerial() {
+    return await customFetch('/serial/reconnect', {
+      method: 'POST',
+    });
+  },
 };

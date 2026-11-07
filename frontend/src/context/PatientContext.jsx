@@ -46,6 +46,8 @@ export const PatientProvider = ({ children }) => {
             ? {
                 ...p,
                 ...(update.movementStatus && { movementStatus: update.movementStatus }),
+                ...(update.piezoActivityStatus && { piezoActivityStatus: update.piezoActivityStatus }),
+                ...(update.lastPiezoActivityUpdate && { lastPiezoActivityUpdate: update.lastPiezoActivityUpdate }),
                 ...(update.roomNumber && { roomNumber: update.roomNumber }),
                 ...(update.bedNumber !== undefined && { bedNumber: update.bedNumber }),
                 ...(update.assignedDeviceId !== undefined && { assignedDeviceId: update.assignedDeviceId }),

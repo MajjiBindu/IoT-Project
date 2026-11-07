@@ -32,6 +32,17 @@ class PatientRepository {
     );
   }
 
+  async updatePiezoActivityStatus(id, piezoActivityStatus) {
+    return await Patient.findByIdAndUpdate(
+      id,
+      {
+        piezoActivityStatus,
+        lastPiezoActivityUpdate: new Date(),
+      },
+      { new: true }
+    );
+  }
+
   async updateLocation(id, { roomNumber, bedNumber, wardId }) {
     const update = {
       roomNumber,

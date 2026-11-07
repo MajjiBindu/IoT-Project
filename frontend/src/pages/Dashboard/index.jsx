@@ -5,6 +5,7 @@ import { useAlerts } from '../../context/AlertContext';
 import { StatusBadge } from '../../components/StatusBadge';
 import { apiClient } from '../../services/apiClient';
 import { AcknowledgeModal } from '../../components/AcknowledgeModal';
+import { ArduinoStatusCard } from '../../components/ArduinoStatusCard';
 
 export const Dashboard = () => {
   const { patients, loading: patientsLoading, error: patientsError, refreshPatients } = usePatients();
@@ -108,6 +109,9 @@ export const Dashboard = () => {
         </div>
       </div>
 
+      {/* Arduino Hardware Integration Status Indicator */}
+      <ArduinoStatusCard />
+
       {/* Main Ward Patient Grid */}
       <div className="glass-panel" style={{ padding: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -186,6 +190,23 @@ export const Dashboard = () => {
                         {patient.assignedDeviceId || 'Unassigned'}
                       </strong>
                     </div>
+                    {patient.piezoActivityStatus && patient.piezoActivityStatus !== 'UNKNOWN' && (
+                      <div style={{ marginTop: '6px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: '50%',
+                            backgroundColor: patient.piezoActivityStatus === 'MOVEMENT_DETECTED' ? '#10b981' : '#f59e0b',
+                          }}
+                        />
+                        <span style={{ color: patient.piezoActivityStatus === 'MOVEMENT_DETECTED' ? '#10b981' : '#f59e0b', fontWeight: 500 }}>
+                          {patient.piezoActivityStatus === 'MOVEMENT_DETECTED'
+                            ? 'Movement detected by piezo sensor'
+                            : 'No recent movement recorded by piezo'}
+                        </span>
+                      </div>
+                    )}
                     {patient.notes && (
                       <p style={{ marginTop: '6px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                         {patient.notes}

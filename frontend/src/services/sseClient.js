@@ -3,7 +3,7 @@ import { getAuthToken } from './apiClient';
 /**
  * Server-Sent Events (SSE) Client
  * Handles authenticated connection lifecycle, event dispatching,
- * deduplication, and reconnection reconciliation.
+ * dynamic listener attachment, deduplication, and reconnection reconciliation.
  */
 class SSEClient {
   constructor() {
@@ -11,6 +11,7 @@ class SSEClient {
     this.status = 'DISCONNECTED'; // CONNECTING, CONNECTED, DISCONNECTED
     this.statusListeners = new Set();
     this.eventListeners = new Map(); // eventType -> Set of callbacks
+    this.attachedDomEvents = new Set();
     this.processedEventIds = new Set();
     this.reconnectTimeout = null;
     this.reconnectListeners = new Set();
@@ -43,10 +44,54 @@ class SSEClient {
       this.eventListeners.set(eventType, new Set());
     }
     this.eventListeners.get(eventType).add(callback);
+
+    // Dynamically attach DOM event listener if EventSource is already active
+    if (this.eventSource && !this.attachedDomEvents.has(eventType)) {
+      this._attachEventListener(eventType);
+    }
+
     return () => {
       const set = this.eventListeners.get(eventType);
       if (set) set.delete(callback);
     };
+  }
+
+  _attachEventListener(eventType) {
+    if (!this.eventSource || this.attachedDomEvents.has(eventType)) return;
+    this.attachedDomEvents.add(eventType);
+
+    this.eventSource.addEventListener(eventType, (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        const eventId = e.lastEventId;
+
+        // Deduplication protection
+        if (eventId && this.processedEventIds.has(eventId)) {
+          console.debug(`[SSE-Client] Dropping duplicate event ID: ${eventId}`);
+          return;
+        }
+        if (eventId) {
+          this.processedEventIds.add(eventId);
+          if (this.processedEventIds.size > 200) {
+            const [first] = this.processedEventIds;
+            this.processedEventIds.delete(first);
+          }
+        }
+
+        const listeners = this.eventListeners.get(eventType);
+        if (listeners && listeners.size > 0) {
+          listeners.forEach((cb) => {
+            try {
+              cb(data, eventId);
+            } catch (err) {
+              console.error(`[SSE-Client] Error in listener for ${eventType}:`, err);
+            }
+          });
+        }
+      } catch (parseError) {
+        console.error(`[SSE-Client] Failed parsing event data for ${eventType}:`, parseError);
+      }
+    });
   }
 
   connect(explicitToken = null) {
@@ -54,6 +99,7 @@ class SSEClient {
       this.eventSource.close();
       this.eventSource = null;
     }
+    this.attachedDomEvents.clear();
 
     const token = explicitToken || getAuthToken();
     if (!token) {
@@ -96,7 +142,7 @@ class SSEClient {
       }
     };
 
-    // Generic and custom event listeners
+    // Generic, domain, and hardware event listeners
     const registeredEvents = [
       'connected',
       'alert_created',
@@ -106,35 +152,15 @@ class SSEClient {
       'simulator_status',
       'device_updated',
       'location_updated',
+      'serial_status',
+      'piezo_telemetry',
+      'serial_diagnostic',
+      'piezo_activity',
+      ...this.eventListeners.keys(),
     ];
 
     registeredEvents.forEach((eventType) => {
-      this.eventSource.addEventListener(eventType, (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          const eventId = e.lastEventId;
-
-          // Deduplication protection
-          if (eventId && this.processedEventIds.has(eventId)) {
-            console.debug(`[SSE-Client] Dropping duplicate event ID: ${eventId}`);
-            return;
-          }
-          if (eventId) {
-            this.processedEventIds.add(eventId);
-            if (this.processedEventIds.size > 200) {
-              const [first] = this.processedEventIds;
-              this.processedEventIds.delete(first);
-            }
-          }
-
-          const listeners = this.eventListeners.get(eventType);
-          if (listeners) {
-            listeners.forEach((cb) => cb(data, eventId));
-          }
-        } catch (parseError) {
-          console.error(`[SSE-Client] Failed parsing event data for ${eventType}:`, parseError);
-        }
-      });
+      this._attachEventListener(eventType);
     });
   }
 
@@ -143,6 +169,7 @@ class SSEClient {
       this.eventSource.close();
       this.eventSource = null;
     }
+    this.attachedDomEvents.clear();
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
     }
