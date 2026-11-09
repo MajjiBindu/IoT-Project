@@ -1,7 +1,10 @@
 /**
  * REST API Client for Hospital Mobility with JWT Authentication Support
  */
-const BASE_URL = '/api';
+export const API_HOST = import.meta.env.VITE_API_URL
+  ? import.meta.env.VITE_API_URL.replace(/\/+$/, '')
+  : '';
+const BASE_URL = `${API_HOST}/api`;
 
 let authToken = localStorage.getItem('hospital_mobility_token') || null;
 
