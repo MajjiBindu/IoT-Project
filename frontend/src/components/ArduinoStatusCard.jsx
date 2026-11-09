@@ -17,7 +17,7 @@ export const ArduinoStatusCard = () => {
       setLoading(true);
       const [res, faultsRes] = await Promise.all([
         apiClient.getSerialStatus(),
-        apiClient.getSerialFaults().catch(() => ({ success: false, data: [] })),
+        apiClient.getSerialFaults('ARDUINO-PIEZO-01', true).catch(() => ({ success: false, data: [] })),
       ]);
       if (res && res.success) {
         setStatusData(res.data);
@@ -28,7 +28,10 @@ export const ArduinoStatusCard = () => {
         }
       }
       if (faultsRes && faultsRes.success && Array.isArray(faultsRes.data)) {
-        setActiveFaults(faultsRes.data);
+        const activeDeviceFaults = faultsRes.data.filter(
+          (f) => !f.recovered && f.deviceId === 'ARDUINO-PIEZO-01'
+        );
+        setActiveFaults(activeDeviceFaults);
       }
     } catch (err) {
       console.warn('[ArduinoStatusCard] Could not fetch serial status:', err.message);
@@ -98,17 +101,26 @@ export const ArduinoStatusCard = () => {
       setDiagnosticWarning(diag.message || 'Sensor diagnostic inspection required.');
     });
 
-    // Listen to hardware fault events
+    // Listen to hardware fault events (strictly requiring exact deviceId === 'ARDUINO-PIEZO-01')
     const unsubFault = sseClient.on('hardware_fault', (fault) => {
+      if (!fault || fault.deviceId !== 'ARDUINO-PIEZO-01') {
+        return;
+      }
       console.warn('[ArduinoStatusCard] SSE hardware_fault received:', fault);
-      setActiveFaults((prev) => [fault, ...prev.filter((f) => f._id !== fault._id)]);
+      setActiveFaults((prev) => [fault, ...prev.filter((f) => (f._id || f.id) !== (fault._id || fault.id))]);
     });
 
-    // Listen to hardware recovery events
-    const unsubRecovery = sseClient.on('hardware_recovered', (rec) => {
-      console.log('[ArduinoStatusCard] SSE hardware_recovered received:', rec);
+    // Listen to hardware recovery events (strictly requiring exact deviceId === 'ARDUINO-PIEZO-01')
+    const handleFaultRecovery = (rec) => {
+      if (!rec || rec.deviceId !== 'ARDUINO-PIEZO-01') {
+        return;
+      }
+      console.log('[ArduinoStatusCard] SSE hardware fault recovery received:', rec);
       setActiveFaults((prev) => prev.filter((f) => f.faultType !== rec.faultType));
-    });
+    };
+
+    const unsubRecovery = sseClient.on('hardware_fault_recovered', handleFaultRecovery);
+    const unsubLegacyRecovery = sseClient.on('hardware_recovered', handleFaultRecovery);
 
     return () => {
       unsubReconnect();
@@ -117,6 +129,7 @@ export const ArduinoStatusCard = () => {
       unsubDiagnostic();
       unsubFault();
       unsubRecovery();
+      unsubLegacyRecovery();
     };
   }, []);
 

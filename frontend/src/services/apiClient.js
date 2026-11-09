@@ -396,8 +396,16 @@ export const apiClient = {
     return await customFetch(`/serial/history?limit=${limit}`);
   },
 
-  async getSerialFaults() {
-    return await customFetch('/serial/faults');
+  async getSerialFaults(deviceId = 'ARDUINO-PIEZO-01', activeOnly = true) {
+    const params = new URLSearchParams();
+    if (activeOnly !== undefined && activeOnly !== null) {
+      params.append('activeOnly', activeOnly ? 'true' : 'false');
+    }
+    if (deviceId) {
+      params.append('deviceId', deviceId);
+    }
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return await customFetch(`/serial/faults${qs}`);
   },
 
   async reconnectSerial() {

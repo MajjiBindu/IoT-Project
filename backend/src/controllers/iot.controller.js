@@ -22,7 +22,7 @@ class IotController {
       }
 
       // Record active gateway connectivity
-      serialBridgeService.recordGatewayTelemetry({
+      await serialBridgeService.recordGatewayTelemetry({
         arduinoSerialStatus: arduinoSerialStatus || 'CONNECTED',
         port: port || 'COM5',
         baudRate: baudRate || 9600,
@@ -152,7 +152,7 @@ class IotController {
   async recordHeartbeat(req, res, next) {
     try {
       const { arduinoSerialStatus, port, baudRate } = req.body;
-      serialBridgeService.recordGatewayHeartbeat({
+      await serialBridgeService.recordGatewayHeartbeat({
         arduinoSerialStatus: arduinoSerialStatus || 'CONNECTED',
         port: port || 'COM5',
         baudRate: baudRate || 9600,
