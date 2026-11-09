@@ -1,4 +1,6 @@
+const mongoose = require('mongoose');
 const serialBridgeService = require('../services/serialBridge.service');
+const piezoEventRepository = require('../repositories/piezoEvent.repository');
 
 class IotController {
   /**
@@ -168,13 +170,29 @@ class IotController {
 
   /**
    * GET /api/iot/status
-   * Verifies gateway connectivity and authentication status.
+   * Verifies gateway connectivity, authentication status, and provides the highest sequence number in the DB.
    */
   async getGatewayStatus(req, res, next) {
     try {
+      const deviceId = (req && req.query && req.query.deviceId) || serialBridgeService.deviceCode || 'ARDUINO-PIEZO-01';
+      let latestSequenceNumber = -1;
+
+      if (mongoose.connection && mongoose.connection.readyState === 1) {
+        try {
+          latestSequenceNumber = await piezoEventRepository.getLatestSequenceForDevice(deviceId);
+        } catch (repoErr) {
+          latestSequenceNumber = serialBridgeService.lastSequenceNumber ?? -1;
+        }
+      } else {
+        // Fallback to in-memory serialBridgeService state when DB is not directly connected
+        latestSequenceNumber = serialBridgeService.lastSequenceNumber ?? -1;
+      }
+
       res.status(200).json({
         success: true,
         gateway: serialBridgeService.getGatewayStatus(),
+        deviceId,
+        latestSequenceNumber: typeof latestSequenceNumber === 'number' ? latestSequenceNumber : -1,
       });
     } catch (err) {
       next(err);

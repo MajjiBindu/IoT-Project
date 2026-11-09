@@ -12,6 +12,9 @@
  * 4. Implements bounded FIFO buffering and exponential backoff for network drops.
  * 5. Sends periodic gateway heartbeats reflecting local Arduino serial status.
  * 6. Handles graceful shutdown and releases the COM port cleanly.
+ * 7. Translates raw Arduino sequence numbers monotonically using SequenceManager,
+ *    preventing sequence collisions on Arduino reboots while preserving 100%
+ *    duplicate protection on network retries.
  *
  * Usage:
  *   node backend/gateway/serial-cloud-bridge.js
@@ -26,6 +29,7 @@ const https = require('https');
 const http = require('http');
 const { URL } = require('url');
 const dotenv = require('dotenv');
+const { SequenceManager } = require('./sequence-manager');
 
 // 1. Load configuration: gateway/.env first, fallback to backend/.env
 const gatewayEnv = path.resolve(__dirname, '.env');
@@ -53,7 +57,14 @@ const BATCH_FLUSH_SIZE = parseInt(process.env.BATCH_FLUSH_SIZE, 10) || 20;
 const IS_VERIFY_ONLY = process.argv.includes('--verify-only') || process.argv.includes('--test');
 const IS_MOCK_SERIAL = process.env.MOCK_SERIAL === 'true' || process.argv.includes('--mock');
 
-// 3. Gateway State
+// 3. Sequence & Persistence Manager
+const sequenceManager = new SequenceManager({
+  deviceCode: DEVICE_CODE,
+  stateFilePath: process.env.GATEWAY_STATE_PATH || path.resolve(__dirname, '.gateway-state.json'),
+  lockFilePath: process.env.GATEWAY_LOCK_PATH || path.resolve(__dirname, '.gateway.lock'),
+});
+
+// 4. Gateway State
 let serialPortInstance = null;
 let serialParserInstance = null;
 let serialStatus = 'DISCONNECTED'; // 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR'
@@ -62,7 +73,7 @@ let heartbeatTimer = null;
 let isShuttingDown = false;
 
 // Queue & Transmission State
-const packetQueue = []; // FIFO queue of { line, enqueuedAt, retries }
+const packetQueue = []; // FIFO queue of { line, globalSeq, rawSeq, type, enqueuedAt, retries }
 let isFlushingQueue = false;
 let backoffDelayMs = 1000;
 let backoffUntilTimestamp = 0;
@@ -72,6 +83,7 @@ const stats = {
   serialLinesRead: 0,
   telemetrySentNew: 0,
   telemetrySentDuplicates: 0,
+  serialDuplicatesSuppressed: 0,
   diagnosticsSent: 0,
   malformedPackets: 0,
   droppedDueToOverflow: 0,
@@ -108,7 +120,7 @@ function sanitize(str) {
  * Uses Node's built-in https/http module with agent: false and Connection: close
  * to ensure sockets are closed immediately and never trigger libuv handle race conditions on Windows.
  */
-function sendToCloud(endpointPath, payload, timeoutMs = 12000) {
+function sendToCloud(endpointPath, payload = null, method = 'POST', timeoutMs = 12000) {
   return new Promise((resolve, reject) => {
     let timer = null;
     let req = null;
@@ -126,20 +138,26 @@ function sendToCloud(endpointPath, payload, timeoutMs = 12000) {
       const isHttps = fullUrl.protocol === 'https:';
       const client = isHttps ? https : http;
 
-      const postData = JSON.stringify(payload);
+      const isPost = method.toUpperCase() === 'POST';
+      const postData = isPost && payload ? JSON.stringify(payload) : null;
+
+      const headers = {
+        'x-gateway-secret': GATEWAY_SECRET,
+        'Connection': 'close',
+      };
+
+      if (isPost && postData) {
+        headers['Content-Type'] = 'application/json';
+        headers['Content-Length'] = Buffer.byteLength(postData);
+      }
 
       const options = {
         protocol: fullUrl.protocol,
         hostname: fullUrl.hostname,
         port: fullUrl.port || (isHttps ? 443 : 80),
         path: fullUrl.pathname + fullUrl.search,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData),
-          'x-gateway-secret': GATEWAY_SECRET,
-          'Connection': 'close',
-        },
+        method: method.toUpperCase(),
+        headers,
         agent: false, // Do not pool sockets
       };
 
@@ -189,7 +207,9 @@ function sendToCloud(endpointPath, payload, timeoutMs = 12000) {
         reject(err);
       });
 
-      req.write(postData);
+      if (isPost && postData) {
+        req.write(postData);
+      }
       req.end();
     } catch (err) {
       cleanup();
@@ -202,7 +222,7 @@ function sendToCloud(endpointPath, payload, timeoutMs = 12000) {
 }
 
 /**
- * Perform initial verification of cloud connectivity and authentication
+ * Perform initial verification of cloud connectivity, authentication, and sequence state
  */
 async function verifyCloudConnection() {
   log('AUTH', `Checking cloud backend reachability: ${CLOUD_BACKEND_URL}`);
@@ -216,7 +236,8 @@ async function verifyCloudConnection() {
 
   try {
     const startTime = Date.now();
-    const res = await sendToCloud('/api/iot/heartbeat', {
+    // 1. Send test heartbeat to confirm authentication and write permissions
+    const resHeartbeat = await sendToCloud('/api/iot/heartbeat', {
       arduinoSerialStatus: 'CONNECTING',
       port: SERIAL_PORT,
       baudRate: SERIAL_BAUD_RATE,
@@ -224,23 +245,33 @@ async function verifyCloudConnection() {
 
     const elapsedMs = Date.now() - startTime;
 
-    if (res.status === 401 || res.status === 403) {
-      log('AUTH', `Authentication failed (HTTP ${res.status}): ${res.data?.message || 'Invalid secret'}`, 'error');
+    if (resHeartbeat.status === 401 || resHeartbeat.status === 403) {
+      log('AUTH', `Authentication failed (HTTP ${resHeartbeat.status}): ${resHeartbeat.data?.message || 'Invalid secret'}`, 'error');
       log('AUTH', 'Please check that GATEWAY_SECRET matches the value set on Render.', 'error');
       return false;
     }
 
-    if (res.ok) {
-      log('AUTH', `Cloud backend verified successfully! (HTTP ${res.status} in ${elapsedMs}ms)`);
-      return true;
+    if (!resHeartbeat.ok) {
+      log('AUTH', `Cloud responded with unexpected status HTTP ${resHeartbeat.status}: ${JSON.stringify(resHeartbeat.data)}`, 'warn');
+      return false;
     }
 
-    log('AUTH', `Cloud responded with unexpected status HTTP ${res.status}: ${JSON.stringify(res.data)}`, 'warn');
-    return false;
+    // 2. Query status endpoint for highest persisted sequence number
+    let latestSequenceNumber = -1;
+    try {
+      const resStatus = await sendToCloud(`/api/iot/status?deviceId=${encodeURIComponent(DEVICE_CODE)}`, null, 'GET');
+      if (resStatus.ok && typeof resStatus.data?.latestSequenceNumber === 'number') {
+        latestSequenceNumber = resStatus.data.latestSequenceNumber;
+      }
+    } catch (statusErr) {
+      log('AUTH', `Warning: could not query latestSequenceNumber: ${statusErr.message}. Defaulting to -1.`, 'warn');
+    }
+
+    log('AUTH', `Cloud backend verified successfully! (HTTP ${resHeartbeat.status} in ${elapsedMs}ms). Current cloud latest sequence for ${DEVICE_CODE}: ${latestSequenceNumber}`);
+    return { ok: true, latestSequenceNumber };
   } catch (err) {
     const isTimeout = err.name === 'AbortError' || err.message?.includes('aborted') || err.message?.includes('timed out');
     log('AUTH', `Connection to cloud failed: ${isTimeout ? 'Request timed out (Render free tier waking up?)' : sanitize(err.message)}`, 'warn');
-    log('AUTH', 'Gateway will proceed with queuing enabled. Packets will be buffered locally.', 'warn');
     return false;
   }
 }
@@ -280,9 +311,37 @@ function enqueueLine(rawLine) {
 
   stats.serialLinesRead += 1;
 
+  let result = null;
+  try {
+    result = sequenceManager.processIncomingLine(line);
+  } catch (err) {
+    log('CRITICAL', `Sequence translation error: ${err.message}`, 'error');
+    return;
+  }
+
+  if (!result) return;
+
   // Ignore raw CSV header lines locally (no need to waste bandwidth)
-  if (line.startsWith('TYPE,SEQUENCE') || line.startsWith('DATA,SEQUENCE')) {
+  if (result.type === 'HEADER') {
     log('SERIAL', `CSV Header ignored: ${line}`);
+    return;
+  }
+
+  // Duplicate serial line suppression (prevents phantom movements from UART line bounces)
+  if (result.type === 'DUPLICATE') {
+    stats.serialDuplicatesSuppressed += 1;
+    log('SERIAL', `Duplicate serial packet suppressed: raw Seq #${result.rawSeq} (prev global Seq #${result.globalSeq}) -> not forwarded`);
+    return;
+  }
+
+  if (result.type === 'MALFORMED') {
+    stats.malformedPackets += 1;
+    log('SERIAL', `Malformed line ignored: ${line} (${result.reason || 'Invalid format'})`, 'warn');
+    return;
+  }
+
+  if (result.type === 'UNRECOGNIZED') {
+    log('SERIAL', `Unrecognized line: ${line}`, 'warn');
     return;
   }
 
@@ -290,11 +349,14 @@ function enqueueLine(rawLine) {
   if (packetQueue.length >= MAX_BUFFER_SIZE) {
     const dropped = packetQueue.shift();
     stats.droppedDueToOverflow += 1;
-    log('QUEUE', `Buffer full (${MAX_BUFFER_SIZE} packets). Dropped oldest packet (Seq #${dropped.line.split(',')[1] || '?'})`, 'warn');
+    log('QUEUE', `Buffer full (${MAX_BUFFER_SIZE} packets). Dropped oldest packet (Seq #${dropped.globalSeq ?? dropped.line.split(',')[1] ?? '?'})`, 'warn');
   }
 
   packetQueue.push({
-    line,
+    line: result.line,
+    globalSeq: result.globalSeq,
+    rawSeq: result.rawSeq,
+    type: result.type,
     enqueuedAt: Date.now(),
     retries: 0,
   });
@@ -334,17 +396,23 @@ async function processQueue() {
       if (res.status === 201) {
         // Success: newly created record
         packetQueue.shift();
+        if (typeof item.globalSeq === 'number') {
+          sequenceManager.markDelivered(item.globalSeq);
+        }
         stats.telemetrySentNew += 1;
         backoffDelayMs = 1000; // Reset backoff on success
-        const seq = item.line.split(',')[1] || '?';
+        const seq = item.globalSeq ?? item.line.split(',')[1] ?? '?';
         const ev = item.line.split(',')[8] || '?';
-        log('CLOUD', `Forwarded Seq #${seq} [${ev}] -> HTTP 201 Created (DB saved)`);
+        log('CLOUD', `Forwarded Seq #${seq} (Arduino #${item.rawSeq ?? '?'}) [${ev}] -> HTTP 201 Created (DB saved)`);
       } else if (res.status === 200 && res.data?.duplicate) {
         // Confirmed duplicate: safely acknowledged
         packetQueue.shift();
+        if (typeof item.globalSeq === 'number') {
+          sequenceManager.markDelivered(item.globalSeq);
+        }
         stats.telemetrySentDuplicates += 1;
         backoffDelayMs = 1000;
-        const seq = item.line.split(',')[1] || '?';
+        const seq = item.globalSeq ?? item.line.split(',')[1] ?? '?';
         log('CLOUD', `Seq #${seq} already in DB -> HTTP 200 (Duplicate acknowledged)`);
       } else if (res.status === 200 && res.data?.type === 'DIAGNOSTIC') {
         // Diagnostic or startup message
@@ -394,6 +462,9 @@ async function processQueue() {
       if (res.ok && res.data?.batch) {
         // Dequeue flushed items
         packetQueue.splice(0, batchSize);
+        const batchSeqs = batchItems.map((b) => b.globalSeq).filter((s) => typeof s === 'number');
+        sequenceManager.markBatchDelivered(batchSeqs);
+
         stats.telemetrySentNew += (res.data.newRecords || 0);
         stats.telemetrySentDuplicates += (res.data.duplicates || 0);
         backoffDelayMs = 1000;
@@ -508,6 +579,8 @@ function openSerialPort() {
 }
 
 function cleanupSerial() {
+  sequenceManager.notifySerialReset();
+
   if (serialParserInstance) {
     try {
       serialParserInstance.removeAllListeners();
@@ -600,6 +673,10 @@ function setupGracefulShutdown() {
     cleanupSerial();
     log('SERIAL', `Released ${SERIAL_PORT}.`);
 
+    // Release instance lock
+    sequenceManager.releaseLock();
+    log('SYSTEM', 'Released gateway instance lock.');
+
     // Best-effort final status notice to cloud
     try {
       await sendToCloud('/api/iot/heartbeat', {
@@ -617,6 +694,7 @@ function setupGracefulShutdown() {
     console.log(` - Serial Lines Read:       ${stats.serialLinesRead}`);
     console.log(` - New Packets Stored:      ${stats.telemetrySentNew}`);
     console.log(` - Duplicates Acknowledged: ${stats.telemetrySentDuplicates}`);
+    console.log(` - Serial Dups Suppressed:   ${stats.serialDuplicatesSuppressed}`);
     console.log(` - Diagnostics Sent:        ${stats.diagnosticsSent}`);
     console.log(` - Rejected Malformed:      ${stats.malformedPackets}`);
     console.log(` - Overflow Dropped:        ${stats.droppedDueToOverflow}`);
@@ -646,9 +724,9 @@ async function main() {
   // Test mode: verify authentication and cloud reachability only
   if (IS_VERIFY_ONLY) {
     log('TEST', 'Running in --verify-only mode...');
-    const ok = await verifyCloudConnection();
-    if (ok) {
-      log('TEST', 'VERIFICATION SUCCESSFUL: Cloud backend accepted gateway secret.');
+    const result = await verifyCloudConnection();
+    if (result && result.ok) {
+      log('TEST', `VERIFICATION SUCCESSFUL: Cloud accepted gateway secret. Latest persisted sequence: ${result.latestSequenceNumber}`);
       process.exitCode = 0;
     } else {
       log('TEST', 'VERIFICATION FAILED: Cloud backend did not acknowledge gateway.', 'error');
@@ -660,8 +738,45 @@ async function main() {
   // Active continuous monitoring lifecycle
   setupGracefulShutdown();
 
-  // Verify cloud backend before opening serial
-  await verifyCloudConnection();
+  // Verify cloud backend and fetch latest sequence number before opening serial
+  const verifyResult = await verifyCloudConnection();
+  if (!verifyResult || !verifyResult.ok) {
+    log('CRITICAL', 'Cannot start gateway: cloud backend is unreachable or unauthorized. Halting.', 'error');
+    process.exitCode = 1;
+    return;
+  }
+
+  // Initialize sequence and persistence manager
+  try {
+    const syncInfo = sequenceManager.init({ cloudLatestSeq: verifyResult.latestSequenceNumber });
+    log('GATEWAY', 'Sequence synchronization established:');
+    log('GATEWAY', ` - Cloud highest sequence:   ${verifyResult.latestSequenceNumber}`);
+    log('GATEWAY', ` - Local baseline floor:      ${syncInfo.startFloor}`);
+    log('GATEWAY', ` - Session base offset:       ${syncInfo.sessionBaseOffset}`);
+    log('GATEWAY', ` - Next assigned sequence:    ${syncInfo.highestAssignedSequence + 1}`);
+    log('GATEWAY', ` - Recovered pending packets: ${syncInfo.recoveredPackets}`);
+
+    // If there were recovered unacknowledged packets from a previous crash, enqueue them now
+    if (syncInfo.recoveredPackets > 0) {
+      const recovered = sequenceManager.getPendingPackets();
+      for (const pkt of recovered) {
+        packetQueue.push({
+          line: pkt.line,
+          globalSeq: pkt.globalSeq,
+          rawSeq: pkt.rawSeq,
+          type: 'DATA',
+          enqueuedAt: pkt.enqueuedAt,
+          retries: pkt.retries || 0,
+        });
+      }
+      log('GATEWAY', `Enqueued ${recovered.length} recovered unacknowledged packets to queue.`);
+      processQueue();
+    }
+  } catch (err) {
+    log('CRITICAL', `Failed to initialize sequence manager: ${err.message}`, 'error');
+    process.exitCode = 1;
+    return;
+  }
 
   // Start periodic heartbeat
   heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);

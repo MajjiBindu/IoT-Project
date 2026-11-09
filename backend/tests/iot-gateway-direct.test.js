@@ -2,6 +2,10 @@ const { verifyGatewaySecret } = require('../src/middleware/gatewayAuth');
 const iotController = require('../src/controllers/iot.controller');
 const serialBridgeService = require('../src/services/serialBridge.service');
 
+jest.mock('../src/repositories/piezoEvent.repository', () => ({
+  getLatestSequenceForDevice: jest.fn().mockResolvedValue(3256),
+}));
+
 const TEST_SECRET = 'secure_gateway_test_secret_32byteslong!';
 process.env.GATEWAY_SECRET = TEST_SECRET;
 
@@ -260,6 +264,8 @@ describe('IoT Gateway Direct Unit Tests (No TCP Binding Needed)', () => {
       expect(getStatus()).toBe(200);
       expect(getBody().success).toBe(true);
       expect(getBody().gateway.connected).toBe(true);
+      expect(getBody().deviceId).toBe('ARDUINO-PIEZO-01');
+      expect(typeof getBody().latestSequenceNumber).toBe('number');
     });
   });
 });
