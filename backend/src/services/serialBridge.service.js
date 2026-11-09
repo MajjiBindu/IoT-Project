@@ -39,6 +39,16 @@ class SerialBridgeService {
       droppedPackets: 0,
       duplicatePackets: 0,
     };
+
+    // Dedicated Laptop Gateway Tracking (distinct from server's local serial port)
+    this.gateway = {
+      connected: false,
+      lastSeen: null,
+      arduinoSerialStatus: 'DISCONNECTED',
+      port: null,
+      baudRate: null,
+      packetsForwarded: 0,
+    };
   }
 
   /**
@@ -48,14 +58,21 @@ class SerialBridgeService {
     try {
       const existing = await deviceRepository.findByCode(this.deviceCode);
       if (!existing) {
+        let defaultPatientId = null;
+        try {
+          const Patient = require('../models/Patient');
+          const defaultPatient = await Patient.findOne({ name: { $regex: /Eleanor/i } });
+          if (defaultPatient) defaultPatientId = defaultPatient._id;
+        } catch {}
+
         await Device.create({
           deviceCode: this.deviceCode,
           batteryLevel: 100,
           status: 'ACTIVE',
-          assignedPatientId: null,
+          assignedPatientId: defaultPatientId,
           lastHeartbeat: new Date(),
         });
-        console.log(`[SerialBridge] Registered default device record for ${this.deviceCode}`);
+        console.log(`[SerialBridge] Registered default device record for ${this.deviceCode} (patient: ${defaultPatientId || 'unassigned'})`);
       }
     } catch (err) {
       console.warn(`[SerialBridge] Device registration check: ${err.message}`);
@@ -98,6 +115,10 @@ class SerialBridgeService {
   async start() {
     this.isStopped = false;
 
+    // Always ensure the device is registered in MongoDB and restore latest state on boot
+    await this.ensureDeviceRegistered();
+    await this.restoreLatestState();
+
     if (this.status === 'CONNECTED' || this.status === 'CONNECTING') {
       console.log(`[SerialBridge] Already ${this.status}. Ignoring start request.`);
       return this.getStatus();
@@ -109,8 +130,6 @@ class SerialBridgeService {
       return this.getStatus();
     }
 
-    await this.ensureDeviceRegistered();
-    await this.restoreLatestState();
     return await this.connect();
   }
 
@@ -455,10 +474,14 @@ class SerialBridgeService {
       return { duplicate: true };
     }
 
-    // Look up device and associated patient
+    // Look up device and associated patient (with defensive registration guarantee)
     let device = null;
     try {
       device = await deviceRepository.findByCode(this.deviceCode);
+      if (!device) {
+        await this.ensureDeviceRegistered();
+        device = await deviceRepository.findByCode(this.deviceCode);
+      }
     } catch {}
 
     const patientId = device?.assignedPatientId
@@ -579,6 +602,49 @@ class SerialBridgeService {
     };
   }
 
+  recordGatewayTelemetry({ arduinoSerialStatus = 'CONNECTED', port = 'COM5', baudRate = 9600 } = {}) {
+    const wasConnected = this.isGatewayAlive();
+    this.gateway.connected = true;
+    this.gateway.lastSeen = new Date();
+    this.gateway.arduinoSerialStatus = arduinoSerialStatus;
+    this.gateway.port = port;
+    this.gateway.baudRate = baudRate;
+    this.gateway.packetsForwarded += 1;
+
+    if (!wasConnected) {
+      sseManager.broadcast('gateway_status', this.getGatewayStatus());
+    }
+  }
+
+  recordGatewayHeartbeat({ arduinoSerialStatus, port, baudRate } = {}) {
+    this.gateway.connected = true;
+    this.gateway.lastSeen = new Date();
+    if (arduinoSerialStatus) this.gateway.arduinoSerialStatus = arduinoSerialStatus;
+    if (port) this.gateway.port = port;
+    if (baudRate) this.gateway.baudRate = baudRate;
+
+    sseManager.broadcast('gateway_status', this.getGatewayStatus());
+  }
+
+  isGatewayAlive() {
+    if (!this.gateway.lastSeen) return false;
+    const diffMs = Date.now() - new Date(this.gateway.lastSeen).getTime();
+    return diffMs < 10000;
+  }
+
+  getGatewayStatus() {
+    const alive = this.isGatewayAlive();
+    this.gateway.connected = alive;
+    return {
+      connected: alive,
+      lastSeen: this.gateway.lastSeen,
+      arduinoSerialStatus: alive ? this.gateway.arduinoSerialStatus : 'DISCONNECTED',
+      port: this.gateway.port || 'COM5',
+      baudRate: this.gateway.baudRate || 9600,
+      packetsForwarded: this.gateway.packetsForwarded,
+    };
+  }
+
   async getStatus() {
     let assignedPatient = null;
     try {
@@ -615,6 +681,7 @@ class SerialBridgeService {
       lastDiagnostic: this.lastDiagnostic,
       stats: { ...this.stats },
       lastError: this.lastError,
+      gateway: this.getGatewayStatus(),
     };
   }
 
